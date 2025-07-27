@@ -443,9 +443,9 @@ class ModelEvaluator:
         self.log_system_resources("(после генерации)")
         
         return {
-            "average_tokens_per_second": avg_tokens_per_sec,
-            "total_tokens": total_tokens,
-            "total_time": total_time,
+            "avg_tokens_per_second": avg_tokens_per_sec,
+            "sum_total_tokens": total_tokens,
+            "sum_total_time": total_time,
             "detailed_stats": generation_stats,
             "speed_measurements": speeds,
             "prompts_and_responses": prompts_and_responses
@@ -497,36 +497,96 @@ class ModelEvaluator:
             for task, metrics in results['results'].items():
                 if 'acc,none' in metrics:
                     accuracy_results[task] = {
-                        'accuracy': round(metrics['acc,none'], 4),
-                        'stderr': round(metrics.get('acc_stderr,none', 0), 4)
+                        'avg_accuracy': {
+                            'value': round(metrics['acc,none'], 4),
+                            'description': f'Средняя точность модели на задаче {task} (доля правильных ответов)'
+                        },
+                        'accuracy_stderr': {
+                            'value': round(metrics.get('acc_stderr,none', 0), 4),
+                            'description': f'Стандартная ошибка точности на задаче {task}'
+                        }
                     }
                 elif 'exact_match,none' in metrics:
                     accuracy_results[task] = {
-                        'exact_match': round(metrics['exact_match,none'], 4),
-                        'stderr': round(metrics.get('exact_match_stderr,none', 0), 4)
+                        'avg_exact_match': {
+                            'value': round(metrics['exact_match,none'], 4),
+                            'description': f'Средняя точность точного совпадения на задаче {task}'
+                        },
+                        'exact_match_stderr': {
+                            'value': round(metrics.get('exact_match_stderr,none', 0), 4),
+                            'description': f'Стандартная ошибка точного совпадения на задаче {task}'
+                        }
                     }
         
         final_system = system_metrics.get('final', {})
         system_summary = {
-            'ram_used_gb': round(final_system.get('memory', {}).get('used_gb', 0), 1),
-            'ram_total_gb': round(final_system.get('memory', {}).get('total_gb', 0), 1),
-            'cpu_percent': round(final_system.get('cpu', {}).get('cpu_avg_percent', 0), 1),
-            'gpu_vram_used_gb': round(final_system.get('gpu', {}).get('memory_used_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
-            'gpu_vram_total_gb': round(final_system.get('gpu', {}).get('memory_total_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0
+            'ram_used_gb': {
+                'value': round(final_system.get('memory', {}).get('used_gb', 0), 1),
+                'description': 'Используемая оперативная память в гигабайтах'
+            },
+            'ram_total_gb': {
+                'value': round(final_system.get('memory', {}).get('total_gb', 0), 1),
+                'description': 'Общий объем оперативной памяти в гигабайтах'
+            },
+            'cpu_percent': {
+                'value': round(final_system.get('cpu', {}).get('cpu_avg_percent', 0), 1),
+                'description': 'Средняя загрузка процессора в процентах'
+            },
+            'gpu_vram_used_gb': {
+                'value': round(final_system.get('gpu', {}).get('memory_used_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
+                'description': 'Используемая видеопамять GPU в гигабайтах'
+            },
+            'gpu_vram_total_gb': {
+                'value': round(final_system.get('gpu', {}).get('memory_total_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
+                'description': 'Общий объем видеопамяти GPU в гигабайтах'
+            }
         }
+        
+        # Добавляем реальную скорость для каждого промпта
+        prompts_with_speed = []
+        for i, prompt_data in enumerate(speed_metrics.get('prompts_and_responses', [])):
+            prompt_speed = speed_metrics['speed_measurements'][i] if i < len(speed_metrics['speed_measurements']) else 0
+            prompt_data_with_speed = {
+                **prompt_data,
+                "real_speed_tokens_per_sec": {
+                    "value": round(prompt_speed, 2),
+                    "description": f"Реальная скорость генерации для промпта {prompt_data['prompt_number']} в токенах в секунду"
+                },
+                "prompt_tokens": {
+                    "value": prompt_data["prompt_tokens"],
+                    "description": f"Количество токенов во входном промпте {prompt_data['prompt_number']}"
+                },
+                "response_tokens": {
+                    "value": prompt_data["response_tokens"],
+                    "description": f"Количество токенов в ответе модели на промпт {prompt_data['prompt_number']}"
+                }
+            }
+            prompts_with_speed.append(prompt_data_with_speed)
         
         output_data = {
             "model_name": self.model_name,
             "timestamp": datetime.now().isoformat(),
             "evaluation_summary": {
-                "evaluation_time_seconds": round(eval_time, 2),
-                "generation_speed_tokens_per_sec": round(speed_metrics['average_tokens_per_second'], 2),
-                "total_tokens_generated": speed_metrics['total_tokens'],
-                "total_generation_time_seconds": round(speed_metrics['total_time'], 2)
+                "evaluation_time_seconds": {
+                    "value": round(eval_time, 2),
+                    "description": "Время выполнения оценки точности модели на стандартных задачах в секундах"
+                },
+                "avg_generation_speed_tokens_per_sec": {
+                    "value": round(speed_metrics['avg_tokens_per_second'], 2),
+                    "description": "Средняя скорость генерации текста в токенах в секунду по всем промптам"
+                },
+                "sum_total_tokens_generated": {
+                    "value": speed_metrics['sum_total_tokens'],
+                    "description": "Общее количество сгенерированных токенов по всем промптам"
+                },
+                "sum_total_generation_time_seconds": {
+                    "value": round(speed_metrics['sum_total_time'], 2),
+                    "description": "Общее время генерации текста по всем промптам в секундах"
+                }
             },
             "accuracy_results": accuracy_results,
             "system_summary": system_summary,
-            "prompts_and_responses": speed_metrics.get('prompts_and_responses', [])
+            "prompts_and_responses": prompts_with_speed
         }
         
         with open(filepath, 'w', encoding='utf-8') as f:
@@ -582,24 +642,70 @@ class ModelEvaluator:
         
         final_system = basic_metrics.get('system_metrics', {}).get('final', {})
         system_summary = {
-            'ram_used_gb': round(final_system.get('memory', {}).get('used_gb', 0), 1),
-            'ram_total_gb': round(final_system.get('memory', {}).get('total_gb', 0), 1),
-            'cpu_percent': round(final_system.get('cpu', {}).get('cpu_avg_percent', 0), 1),
-            'gpu_vram_used_gb': round(final_system.get('gpu', {}).get('memory_used_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
-            'gpu_vram_total_gb': round(final_system.get('gpu', {}).get('memory_total_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0
+            'ram_used_gb': {
+                'value': round(final_system.get('memory', {}).get('used_gb', 0), 1),
+                'description': 'Используемая оперативная память в гигабайтах'
+            },
+            'ram_total_gb': {
+                'value': round(final_system.get('memory', {}).get('total_gb', 0), 1),
+                'description': 'Общий объем оперативной памяти в гигабайтах'
+            },
+            'cpu_percent': {
+                'value': round(final_system.get('cpu', {}).get('cpu_avg_percent', 0), 1),
+                'description': 'Средняя загрузка процессора в процентах'
+            },
+            'gpu_vram_used_gb': {
+                'value': round(final_system.get('gpu', {}).get('memory_used_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
+                'description': 'Используемая видеопамять GPU в гигабайтах'
+            },
+            'gpu_vram_total_gb': {
+                'value': round(final_system.get('gpu', {}).get('memory_total_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
+                'description': 'Общий объем видеопамяти GPU в гигабайтах'
+            }
         }
+        
+        # Добавляем реальную скорость для каждого промпта
+        prompts_with_speed = []
+        detailed_metrics = basic_metrics.get('generation_speed_detailed', {})
+        for i, prompt_data in enumerate(detailed_metrics.get('prompts_and_responses', [])):
+            prompt_speed = detailed_metrics['speed_measurements'][i] if i < len(detailed_metrics.get('speed_measurements', [])) else 0
+            prompt_data_with_speed = {
+                **prompt_data,
+                "real_speed_tokens_per_sec": {
+                    "value": round(prompt_speed, 2),
+                    "description": f"Реальная скорость генерации для промпта {prompt_data['prompt_number']} в токенах в секунду"
+                },
+                "prompt_tokens": {
+                    "value": prompt_data["prompt_tokens"],
+                    "description": f"Количество токенов во входном промпте {prompt_data['prompt_number']}"
+                },
+                "response_tokens": {
+                    "value": prompt_data["response_tokens"],
+                    "description": f"Количество токенов в ответе модели на промпт {prompt_data['prompt_number']}"
+                }
+            }
+            prompts_with_speed.append(prompt_data_with_speed)
         
         output_data = {
             "model_name": basic_metrics['model_name'],
             "timestamp": datetime.now().isoformat(),
             "evaluation_type": "basic",
             "evaluation_summary": {
-                "generation_speed_tokens_per_sec": round(basic_metrics['generation_speed'], 2),
-                "total_tokens_generated": basic_metrics['total_tokens_generated'],
-                "total_generation_time_seconds": round(basic_metrics['generation_time'], 2)
+                "avg_generation_speed_tokens_per_sec": {
+                    "value": round(basic_metrics['generation_speed'], 2),
+                    "description": "Средняя скорость генерации текста в токенах в секунду по всем промптам"
+                },
+                "sum_total_tokens_generated": {
+                    "value": basic_metrics['total_tokens_generated'],
+                    "description": "Общее количество сгенерированных токенов по всем промптам"
+                },
+                "sum_total_generation_time_seconds": {
+                    "value": round(basic_metrics['generation_time'], 2),
+                    "description": "Общее время генерации текста по всем промптам в секундах"
+                }
             },
             "system_summary": system_summary,
-            "prompts_and_responses": basic_metrics.get('generation_speed_detailed', {}).get('prompts_and_responses', [])
+            "prompts_and_responses": prompts_with_speed
         }
         
         with open(filepath, 'w', encoding='utf-8') as f:
@@ -656,10 +762,10 @@ class ModelEvaluator:
                 "model_name": self.model_name,
                 "load_time": 0.0,
                 "evaluation_time": 0.0,
-                "generation_speed": speed_metrics['average_tokens_per_second'],
-                "total_tokens_generated": speed_metrics['total_tokens'],
-                "generation_time": speed_metrics["total_time"],
-                "total_time": speed_metrics["total_time"],
+                "generation_speed": speed_metrics['avg_tokens_per_second'],
+                "total_tokens_generated": speed_metrics['sum_total_tokens'],
+                "generation_time": speed_metrics["sum_total_time"],
+                "total_time": speed_metrics["sum_total_time"],
                 "system_metrics": {
                     "initial": initial_system_metrics,
                     "final": final_system_metrics,
@@ -757,10 +863,10 @@ class ModelEvaluator:
                 "model_name": self.model_name,
                 "load_time": 0.0,
                 "evaluation_time": eval_time,
-                "generation_speed": speed_metrics['average_tokens_per_second'],
-                "total_tokens_generated": speed_metrics['total_tokens'],
-                "generation_time": speed_metrics["total_time"],
-                "total_time": eval_time + speed_metrics["total_time"],
+                "generation_speed": speed_metrics['avg_tokens_per_second'],
+                "total_tokens_generated": speed_metrics['sum_total_tokens'],
+                "generation_time": speed_metrics["sum_total_time"],
+                "total_time": eval_time + speed_metrics["sum_total_time"],
                 "system_metrics": system_metrics,
                 "results_file": result_file,
                 "lm_eval_results": results,
