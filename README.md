@@ -34,8 +34,8 @@ full_results = evaluate_full_model(model, tokenizer, "MyModel", tasks=["hellaswa
 
 ## Основные функции
 
-- `evaluate_basic_model(model, tokenizer, model_name=None, num_samples=10, save_results=True)`
-- `evaluate_full_model(model, tokenizer, model_name=None, tasks=["hellaswag", "mmlu", "gsm8k"], batch_size=8, num_samples=10, save_results=True)`
+- `evaluate_basic_model(model, tokenizer, model_name=None, save_results=True)`
+- `evaluate_full_model(model, tokenizer, model_name=None, tasks=["hellaswag", "mmlu", "gsm8k"], batch_size=8, save_results=True)`
 
 ## Пример сравнения моделей
 

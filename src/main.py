@@ -170,7 +170,7 @@ class ModelEvaluator:
         
         return results, eval_time
     
-    def measure_generation_speed(self, num_samples=10):
+    def measure_generation_speed(self):
         """Замер скорости генерации модели (5 промптов)."""
         self.logger.info("Замер скорости генерации...")
         self.log_system_resources("(перед генерацией)")
@@ -183,7 +183,6 @@ class ModelEvaluator:
             "Что такое математическое ожидание и как его вычислить?"
         ]
         
-        test_prompts = test_prompts[:5]
         self.logger.info(f"Используется {len(test_prompts)} уникальных промптов для оценки")
         
         total_tokens = 0
@@ -355,13 +354,13 @@ class ModelEvaluator:
         self.logger.info(f"Базовые результаты сохранены в {filepath}")
         return filepath
 
-    def run_basic_evaluation(self, num_samples=10, save_results=True):
+    def run_basic_evaluation(self, save_results=True):
         """Базовая оценка модели - только производительность."""
         try:
             self.logger.info("Запуск базовой оценки модели")
             
             initial_system_metrics = self.log_system_resources("(начало)")
-            speed_metrics = self.measure_generation_speed(num_samples)
+            speed_metrics = self.measure_generation_speed()
             final_system_metrics = self.log_system_resources("(окончание)")
             
             basic_metrics = {
@@ -395,7 +394,7 @@ class ModelEvaluator:
             self.logger.exception("Подробности ошибки:")
             raise
 
-    def run_full_evaluation(self, tasks=["hellaswag", "mmlu", "gsm8k"], batch_size=8, num_samples=10, save_results=True):
+    def run_full_evaluation(self, tasks=["hellaswag", "mmlu", "gsm8k"], batch_size=8, save_results=True):
         """Расширенная оценка модели - включает тесты точности."""
         try:
             self.logger.info("Запуск расширенной оценки модели")
@@ -407,7 +406,7 @@ class ModelEvaluator:
             if tasks:
                 results, eval_time = self.evaluate_model(tasks, batch_size)
             
-            speed_metrics = self.measure_generation_speed(num_samples)
+            speed_metrics = self.measure_generation_speed()
             final_system_metrics = self.log_system_resources("(окончание)")
             
             system_metrics = {
@@ -590,17 +589,17 @@ class ModelEvaluator:
         self._print_full_summary(summary)
 
 # Функция для базовой оценки модели
-def evaluate_basic_model(model, tokenizer, model_name=None, num_samples=10, save_results=True):
+def evaluate_basic_model(model, tokenizer, model_name=None, save_results=True):
     """Базовая оценка модели - только производительность."""
     evaluator_obj = ModelEvaluator(model=model, tokenizer=tokenizer, model_name=model_name)
-    return evaluator_obj.run_basic_evaluation(num_samples, save_results)
+    return evaluator_obj.run_basic_evaluation(save_results)
 
 # Функция для расширенной оценки модели
 def evaluate_full_model(model, tokenizer, model_name=None, tasks=["hellaswag", "mmlu", "gsm8k"], 
-                       batch_size=8, num_samples=10, save_results=True):
+                       batch_size=8, save_results=True):
     """Расширенная оценка модели - включает тесты точности."""
     evaluator_obj = ModelEvaluator(model=model, tokenizer=tokenizer, model_name=model_name)
-    return evaluator_obj.run_full_evaluation(tasks, batch_size, num_samples, save_results)
+    return evaluator_obj.run_full_evaluation(tasks, batch_size, save_results)
 
 # Функции для сравнения моделей
 
@@ -620,7 +619,6 @@ def compare_models_basic(model_configs):
             model=model,
             tokenizer=tokenizer,
             model_name=config['name'],
-            num_samples=config.get('num_samples', 20),
             save_results=True
         )
         
@@ -649,7 +647,6 @@ def compare_models_full(model_configs):
             model_name=config['name'],
             tasks=config.get('tasks', ['hellaswag']),
             batch_size=config.get('batch_size', 4),
-            num_samples=config.get('num_samples', 10),
             save_results=True
         )
         
