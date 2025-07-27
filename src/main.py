@@ -46,11 +46,36 @@ def setup_logging():
 logger = setup_logging()
 
 class SystemMonitor:
-    """Мониторинг системных ресурсов (CPU, RAM, GPU)."""
+    """
+    Класс для мониторинга системных ресурсов (CPU, RAM, GPU).
+    
+    Предоставляет статические методы для получения информации о:
+    - Загрузке процессора (по ядрам и общая)
+    - Использовании оперативной памяти
+    - Состоянии графического процессора
+    
+    Все методы возвращают словари с метриками в удобном для анализа формате.
+    """
     
     @staticmethod
     def get_cpu_info():
-        """Получение информации о CPU."""
+        """
+        Получение детальной информации о загрузке процессора.
+        
+        Измеряет загрузку каждого ядра процессора и вычисляет среднее значение.
+        Использует интервал в 1 секунду для получения актуальных данных.
+        
+        Returns:
+            dict: Словарь с информацией о CPU:
+                - cpu_percent_per_core (list): Загрузка каждого ядра в процентах
+                - cpu_avg_percent (float): Средняя загрузка всех ядер
+                - cpu_count (int): Количество физических ядер
+                - cpu_count_logical (int): Количество логических ядер
+                
+        Example:
+            >>> cpu_info = SystemMonitor.get_cpu_info()
+            >>> print(f"Средняя загрузка: {cpu_info['cpu_avg_percent']:.1f}%")
+        """
         cpu_percent = psutil.cpu_percent(interval=1, percpu=True)
         cpu_avg = sum(cpu_percent) / len(cpu_percent)
         return {
@@ -62,7 +87,23 @@ class SystemMonitor:
     
     @staticmethod
     def get_memory_info():
-        """Получение информации о RAM."""
+        """
+        Получение информации об использовании оперативной памяти.
+        
+        Измеряет общий объем, доступную, используемую память и процент использования.
+        Все значения памяти возвращаются в гигабайтах для удобства.
+        
+        Returns:
+            dict: Словарь с информацией о RAM:
+                - total_gb (float): Общий объем памяти в ГБ
+                - available_gb (float): Доступная память в ГБ
+                - used_gb (float): Используемая память в ГБ
+                - percent (float): Процент использования памяти
+                
+        Example:
+            >>> mem_info = SystemMonitor.get_memory_info()
+            >>> print(f"Использовано: {mem_info['used_gb']:.1f} ГБ из {mem_info['total_gb']:.1f} ГБ")
+        """
         memory = psutil.virtual_memory()
         return {
             "total_gb": round(memory.total / (1024**3), 2),
@@ -73,7 +114,29 @@ class SystemMonitor:
     
     @staticmethod
     def get_gpu_info():
-        """Получение информации о GPU."""
+        """
+        Получение информации о состоянии графического процессора.
+        
+        Измеряет память GPU, загрузку и температуру. Если GPU недоступен
+        или произошла ошибка, возвращает словарь с информацией об ошибке.
+        
+        Returns:
+            dict: Словарь с информацией о GPU:
+                - name (str): Название GPU
+                - memory_total_gb (float): Общий объем видеопамяти в ГБ
+                - memory_used_gb (float): Используемая видеопамять в ГБ
+                - memory_free_gb (float): Свободная видеопамять в ГБ
+                - utilization_percent (float): Загрузка GPU в процентах
+                - temperature (float): Температура GPU в градусах Цельсия
+                
+            Или словарь с ошибкой:
+                - error (str): Описание ошибки
+                
+        Example:
+            >>> gpu_info = SystemMonitor.get_gpu_info()
+            >>> if 'error' not in gpu_info:
+            ...     print(f"GPU: {gpu_info['name']}, Память: {gpu_info['memory_used_gb']:.1f}/{gpu_info['memory_total_gb']:.1f} ГБ")
+        """
         try:
             gpus = GPUtil.getGPUs()
             if gpus:
@@ -94,23 +157,55 @@ class ModelEvaluator:
     """
     Основной класс для оценки языковых моделей.
     
-    Предоставляет методы для:
-    - Мониторинга системных ресурсов
-    - Оценки точности модели на различных задачах
-    - Измерения скорости генерации
-    - Сохранения результатов в JSON файлы
+    Предоставляет комплексные методы для оценки производительности и точности
+    предобученных языковых моделей. Включает мониторинг системных ресурсов,
+    измерение скорости генерации и оценку точности на стандартных тестах.
     
-    Атрибуты:
-        model: Предзагруженная модель (torch.nn.Module)
-        tokenizer: Предзагруженный токенизатор
-        model_name (str): Название модели для логирования
+    Основные возможности:
+    - Мониторинг системных ресурсов (CPU, RAM, GPU) до и после оценки
+    - Измерение скорости генерации на 5 специализированных промптах
+    - Оценка точности на стандартных задачах (hellaswag, mmlu, gsm8k)
+    - Сохранение результатов в структурированном JSON формате
+    - Детальная статистика по каждому промпту
+    
+    Attributes:
+        model: Предобученная модель Hugging Face
+        tokenizer: Токенизатор для модели
+        model_name (str): Название модели для идентификации
         device (str): Устройство для вычислений ('cuda' или 'cpu')
-        logger: Объект логирования
-        system_monitor: Экземпляр SystemMonitor для мониторинга ресурсов
+        logger: Логгер для записи процесса оценки
+        
+    Example:
+        >>> from transformers import AutoTokenizer, AutoModelForCausalLM
+        >>> tokenizer = AutoTokenizer.from_pretrained("gpt2")
+        >>> model = AutoModelForCausalLM.from_pretrained("gpt2")
+        >>> evaluator = ModelEvaluator(model, tokenizer, "GPT-2")
+        >>> results = evaluator.run_basic_evaluation()
     """
     
     def __init__(self, model, tokenizer, model_name=None):
-        """Инициализация оценщика модели."""
+        """
+        Инициализация оценщика модели.
+        
+        Создает экземпляр ModelEvaluator с предзагруженной моделью и токенизатором.
+        Автоматически определяет доступное устройство (CUDA/CPU) и настраивает
+        мониторинг системных ресурсов.
+        
+        Args:
+            model: Предобученная модель Hugging Face (AutoModelForCausalLM или аналогичная)
+            tokenizer: Токенизатор для модели (AutoTokenizer или аналогичный)
+            model_name (str, optional): Название модели для идентификации в логах и файлах.
+                                       Если не указано, используется "preloaded_model"
+        
+        Raises:
+            ValueError: Если model или tokenizer равны None
+            
+        Example:
+            >>> from transformers import AutoTokenizer, AutoModelForCausalLM
+            >>> tokenizer = AutoTokenizer.from_pretrained("gpt2")
+            >>> model = AutoModelForCausalLM.from_pretrained("gpt2")
+            >>> evaluator = ModelEvaluator(model, tokenizer, "GPT-2")
+        """
         if model is None or tokenizer is None:
             raise ValueError("model и tokenizer должны быть переданы (не None)")
         
@@ -127,7 +222,27 @@ class ModelEvaluator:
         self.logger.info(f"Модель: {type(self.model).__name__}")
         
     def log_system_resources(self, phase=""):
-        """Логирование системных ресурсов."""
+        """
+        Логирование текущего состояния системных ресурсов.
+        
+        Собирает информацию о загрузке CPU, использовании RAM и состоянии GPU,
+        записывает её в лог и возвращает структурированные данные для анализа.
+        
+        Args:
+            phase (str, optional): Описательная метка фазы (например, "(начало)", "(после генерации)").
+                                 Используется для идентификации момента измерения в логах.
+        
+        Returns:
+            dict: Словарь с информацией о системных ресурсах:
+                - cpu (dict): Информация о процессоре (загрузка, количество ядер)
+                - memory (dict): Информация об оперативной памяти (использование, общий объем)
+                - gpu (dict): Информация о графическом процессоре (память, загрузка)
+                
+        Example:
+            >>> evaluator = ModelEvaluator(model, tokenizer)
+            >>> resources = evaluator.log_system_resources("(перед оценкой)")
+            >>> print(f"CPU загрузка: {resources['cpu']['cpu_avg_percent']:.1f}%")
+        """
         cpu_info = self.system_monitor.get_cpu_info()
         memory_info = self.system_monitor.get_memory_info()
         gpu_info = self.system_monitor.get_gpu_info()
@@ -146,7 +261,33 @@ class ModelEvaluator:
         return {"cpu": cpu_info, "memory": memory_info, "gpu": gpu_info}
     
     def evaluate_model(self, tasks=["hellaswag", "mmlu", "gsm8k"], batch_size=8):
-        """Оценка модели с помощью LM Evaluation Harness."""
+        """
+        Оценка точности модели на стандартных задачах с помощью LM Evaluation Harness.
+        
+        Выполняет оценку модели на указанных задачах, используя библиотеку lm_eval.
+        Измеряет время выполнения и логирует системные ресурсы до и после оценки.
+        
+        Args:
+            tasks (list, optional): Список задач для оценки. По умолчанию:
+                - "hellaswag": Тест на понимание контекста и здравый смысл
+                - "mmlu": Massive Multitask Language Understanding
+                - "gsm8k": Математические задачи
+            batch_size (int, optional): Размер батча для обработки. По умолчанию 8.
+        
+        Returns:
+            tuple: (results, eval_time)
+                - results (dict): Результаты оценки с метриками точности по каждой задаче
+                - eval_time (float): Время выполнения оценки в секундах
+                
+        Note:
+            Требует установленной библиотеки lm_eval и соответствующих датасетов.
+            Первый запуск может занять время на загрузку данных.
+            
+        Example:
+            >>> evaluator = ModelEvaluator(model, tokenizer)
+            >>> results, time = evaluator.evaluate_model(["hellaswag", "gsm8k"])
+            >>> print(f"Hellaswag accuracy: {results['results']['hellaswag']['acc,none']:.3f}")
+        """
         self.logger.info(f"Запуск оценки для задач: {tasks}")
         self.log_system_resources("(перед оценкой)")
         
@@ -171,7 +312,38 @@ class ModelEvaluator:
         return results, eval_time
     
     def measure_generation_speed(self):
-        """Замер скорости генерации модели (5 промптов)."""
+        """
+        Измерение скорости генерации модели на специализированных промптах.
+        
+        Выполняет генерацию ответов на 5 предопределенных промптов, связанных с
+        математикой и страхованием. Измеряет время генерации, количество токенов
+        и вычисляет скорость генерации для каждого промпта и в среднем.
+        
+        Промпты включают:
+        - Градиентный спуск (машинное обучение)
+        - Вероятность (математика)
+        - Убыточные полисы (страхование)
+        - Франшиза в автостраховании (страхование)
+        - Математическое ожидание (математика)
+        
+        Returns:
+            dict: Словарь с результатами измерения скорости:
+                - average_tokens_per_second (float): Средняя скорость генерации (токенов/сек)
+                - total_tokens (int): Общее количество сгенерированных токенов
+                - total_time (float): Общее время генерации в секундах
+                - detailed_stats (list): Детальная статистика по каждому промпту
+                - speed_measurements (list): Список скоростей для каждого промпта
+                - prompts_and_responses (list): Промпты и ответы модели
+                
+        Note:
+            Использует параметры генерации, оптимизированные для подавления
+            "thinking" вывода и улучшения качества ответов.
+            
+        Example:
+            >>> evaluator = ModelEvaluator(model, tokenizer)
+            >>> speed_metrics = evaluator.measure_generation_speed()
+            >>> print(f"Средняя скорость: {speed_metrics['average_tokens_per_second']:.2f} токенов/сек")
+        """
         self.logger.info("Замер скорости генерации...")
         self.log_system_resources("(перед генерацией)")
         
@@ -258,7 +430,35 @@ class ModelEvaluator:
         }
     
     def save_results(self, results, eval_time, speed_metrics, system_metrics, filename=None):
-        """Сохранение результатов оценки в JSON файл."""
+        """
+        Сохранение полных результатов оценки в структурированный JSON файл.
+        
+        Создает JSON файл с результатами расширенной оценки, включая метрики точности,
+        производительности и системные ресурсы. Файл сохраняется в папку 'results'
+        с автоматически генерируемым именем на основе названия модели и даты.
+        
+        Args:
+            results (dict): Результаты оценки точности от lm_eval
+            eval_time (float): Время выполнения оценки в секундах
+            speed_metrics (dict): Метрики скорости генерации
+            system_metrics (dict): Системные метрики (начальные и финальные)
+            filename (str, optional): Пользовательское имя файла. Если не указано,
+                                    генерируется автоматически в формате:
+                                    "{model_name}_evaluation_results_{YYYYMMDD}.json"
+        
+        Returns:
+            str: Путь к сохраненному файлу
+            
+        Note:
+            Создает папку 'results' автоматически, если она не существует.
+            Извлекает только ключевые метрики точности (accuracy/exact_match)
+            для упрощения структуры JSON.
+            
+        Example:
+            >>> evaluator = ModelEvaluator(model, tokenizer, "MyModel")
+            >>> filepath = evaluator.save_results(results, 120.5, speed_metrics, system_metrics)
+            >>> print(f"Результаты сохранены в: {filepath}")
+        """
         results_dir = "results"
         if not os.path.exists(results_dir):
             os.makedirs(results_dir)
@@ -314,7 +514,39 @@ class ModelEvaluator:
         return filepath
 
     def save_basic_results(self, basic_metrics, filename=None):
-        """Сохранение базовых результатов оценки в JSON файл."""
+        """
+        Сохранение базовых результатов оценки в структурированный JSON файл.
+        
+        Создает JSON файл с результатами базовой оценки, включая только метрики
+        производительности и системные ресурсы (без тестов точности). Файл сохраняется
+        в папку 'results' с автоматически генерируемым именем.
+        
+        Args:
+            basic_metrics (dict): Словарь с базовыми метриками оценки:
+                - model_name (str): Название модели
+                - generation_speed (float): Скорость генерации в токенах/сек
+                - total_tokens_generated (int): Общее количество токенов
+                - generation_time (float): Время генерации в секундах
+                - system_metrics (dict): Системные метрики
+                - generation_speed_detailed (dict): Детальные метрики скорости
+            filename (str, optional): Пользовательское имя файла. Если не указано,
+                                    генерируется автоматически в формате:
+                                    "{model_name}_basic_evaluation_{YYYYMMDD}.json"
+        
+        Returns:
+            str: Путь к сохраненному файлу
+            
+        Note:
+            Создает папку 'results' автоматически, если она не существует.
+            Структура JSON включает только метрики производительности,
+            что делает файл более компактным по сравнению с полной оценкой.
+            
+        Example:
+            >>> evaluator = ModelEvaluator(model, tokenizer, "MyModel")
+            >>> basic_metrics = evaluator.run_basic_evaluation(save_results=False)
+            >>> filepath = evaluator.save_basic_results(basic_metrics)
+            >>> print(f"Базовые результаты сохранены в: {filepath}")
+        """
         results_dir = "results"
         if not os.path.exists(results_dir):
             os.makedirs(results_dir)
@@ -355,7 +587,42 @@ class ModelEvaluator:
         return filepath
 
     def run_basic_evaluation(self, save_results=True):
-        """Базовая оценка модели - только производительность."""
+        """
+        Выполнение базовой оценки модели - только производительность.
+        
+        Проводит быструю оценку модели, измеряя скорость генерации на 5 специализированных
+        промптах и собирая системные метрики. Не включает тесты точности, что делает
+        оценку значительно быстрее полной версии.
+        
+        Args:
+            save_results (bool, optional): Сохранять ли результаты в JSON файл.
+                                         По умолчанию True.
+        
+        Returns:
+            dict: Словарь с результатами базовой оценки:
+                - model_name (str): Название модели
+                - load_time (float): Время загрузки (0.0 для предзагруженных моделей)
+                - evaluation_time (float): Время оценки (0.0 для базовой оценки)
+                - generation_speed (float): Средняя скорость генерации в токенах/сек
+                - total_tokens_generated (int): Общее количество сгенерированных токенов
+                - generation_time (float): Общее время генерации в секундах
+                - total_time (float): Общее время выполнения
+                - system_metrics (dict): Системные метрики (начальные и финальные)
+                - generation_speed_detailed (dict): Детальные метрики скорости
+                - results_file (str, optional): Путь к сохраненному файлу (если save_results=True)
+                
+        Raises:
+            Exception: При ошибках во время оценки (логируется детально)
+            
+        Note:
+            Автоматически выводит сводку результатов в консоль.
+            Если save_results=True, создает JSON файл в папке 'results'.
+            
+        Example:
+            >>> evaluator = ModelEvaluator(model, tokenizer, "GPT-2")
+            >>> results = evaluator.run_basic_evaluation()
+            >>> print(f"Скорость генерации: {results['generation_speed']:.2f} токенов/сек")
+        """
         try:
             self.logger.info("Запуск базовой оценки модели")
             
@@ -395,7 +662,50 @@ class ModelEvaluator:
             raise
 
     def run_full_evaluation(self, tasks=["hellaswag", "mmlu", "gsm8k"], batch_size=8, save_results=True):
-        """Расширенная оценка модели - включает тесты точности."""
+        """
+        Выполнение полной оценки модели - включает тесты точности и производительности.
+        
+        Проводит комплексную оценку модели, включающую:
+        1. Оценку точности на стандартных задачах (hellaswag, mmlu, gsm8k)
+        2. Измерение скорости генерации на специализированных промптах
+        3. Мониторинг системных ресурсов на всех этапах
+        
+        Args:
+            tasks (list, optional): Список задач для оценки точности. По умолчанию:
+                - "hellaswag": Тест на понимание контекста и здравый смысл
+                - "mmlu": Massive Multitask Language Understanding
+                - "gsm8k": Математические задачи
+            batch_size (int, optional): Размер батча для оценки точности. По умолчанию 8.
+            save_results (bool, optional): Сохранять ли результаты в JSON файл.
+                                         По умолчанию True.
+        
+        Returns:
+            dict: Словарь с результатами полной оценки:
+                - model_name (str): Название модели
+                - load_time (float): Время загрузки (0.0 для предзагруженных моделей)
+                - evaluation_time (float): Время оценки точности в секундах
+                - generation_speed (float): Средняя скорость генерации в токенах/сек
+                - total_tokens_generated (int): Общее количество сгенерированных токенов
+                - generation_time (float): Время генерации в секундах
+                - total_time (float): Общее время выполнения (оценка + генерация)
+                - system_metrics (dict): Системные метрики (начальные и финальные)
+                - results_file (str, optional): Путь к сохраненному файлу
+                - lm_eval_results (dict): Полные результаты lm_eval
+                - generation_speed_detailed (dict): Детальные метрики скорости
+                
+        Raises:
+            Exception: При ошибках во время оценки (логируется детально)
+            
+        Note:
+            Автоматически выводит сводку результатов в консоль.
+            Если save_results=True, создает JSON файл в папке 'results'.
+            Может занять значительное время в зависимости от количества задач.
+            
+        Example:
+            >>> evaluator = ModelEvaluator(model, tokenizer, "GPT-2")
+            >>> results = evaluator.run_full_evaluation(tasks=["hellaswag"])
+            >>> print(f"Точность Hellaswag: {results['lm_eval_results']['results']['hellaswag']['acc,none']:.3f}")
+        """
         try:
             self.logger.info("Запуск расширенной оценки модели")
             
@@ -590,21 +900,114 @@ class ModelEvaluator:
 
 # Функция для базовой оценки модели
 def evaluate_basic_model(model, tokenizer, model_name=None, save_results=True):
-    """Базовая оценка модели - только производительность."""
+    """
+    Удобная функция для базовой оценки модели - только производительность.
+    
+    Создает экземпляр ModelEvaluator и выполняет базовую оценку модели,
+    измеряя скорость генерации на специализированных промптах без тестов точности.
+    
+    Args:
+        model: Предобученная модель Hugging Face (AutoModelForCausalLM или аналогичная)
+        tokenizer: Токенизатор для модели (AutoTokenizer или аналогичный)
+        model_name (str, optional): Название модели для идентификации.
+                                   Если не указано, используется "preloaded_model"
+        save_results (bool, optional): Сохранять ли результаты в JSON файл.
+                                      По умолчанию True.
+    
+    Returns:
+        dict: Словарь с результатами базовой оценки (см. ModelEvaluator.run_basic_evaluation)
+        
+    Note:
+        Это удобная функция-обертка для быстрого запуска базовой оценки
+        без необходимости создавать экземпляр ModelEvaluator вручную.
+        
+    Example:
+        >>> from transformers import AutoTokenizer, AutoModelForCausalLM
+        >>> tokenizer = AutoTokenizer.from_pretrained("gpt2")
+        >>> model = AutoModelForCausalLM.from_pretrained("gpt2")
+        >>> results = evaluate_basic_model(model, tokenizer, "GPT-2")
+        >>> print(f"Скорость генерации: {results['generation_speed']:.2f} токенов/сек")
+    """
     evaluator_obj = ModelEvaluator(model=model, tokenizer=tokenizer, model_name=model_name)
     return evaluator_obj.run_basic_evaluation(save_results)
 
 # Функция для расширенной оценки модели
 def evaluate_full_model(model, tokenizer, model_name=None, tasks=["hellaswag", "mmlu", "gsm8k"], 
                        batch_size=8, save_results=True):
-    """Расширенная оценка модели - включает тесты точности."""
+    """
+    Удобная функция для полной оценки модели - включает тесты точности и производительности.
+    
+    Создает экземпляр ModelEvaluator и выполняет комплексную оценку модели,
+    включающую тесты точности на стандартных задачах и измерение скорости генерации.
+    
+    Args:
+        model: Предобученная модель Hugging Face (AutoModelForCausalLM или аналогичная)
+        tokenizer: Токенизатор для модели (AutoTokenizer или аналогичный)
+        model_name (str, optional): Название модели для идентификации.
+                                   Если не указано, используется "preloaded_model"
+        tasks (list, optional): Список задач для оценки точности. По умолчанию:
+            - "hellaswag": Тест на понимание контекста и здравый смысл
+            - "mmlu": Massive Multitask Language Understanding
+            - "gsm8k": Математические задачи
+        batch_size (int, optional): Размер батча для оценки точности. По умолчанию 8.
+        save_results (bool, optional): Сохранять ли результаты в JSON файл.
+                                      По умолчанию True.
+    
+    Returns:
+        dict: Словарь с результатами полной оценки (см. ModelEvaluator.run_full_evaluation)
+        
+    Note:
+        Это удобная функция-обертка для быстрого запуска полной оценки
+        без необходимости создавать экземпляр ModelEvaluator вручную.
+        Может занять значительное время в зависимости от количества задач.
+        
+    Example:
+        >>> from transformers import AutoTokenizer, AutoModelForCausalLM
+        >>> tokenizer = AutoTokenizer.from_pretrained("gpt2")
+        >>> model = AutoModelForCausalLM.from_pretrained("gpt2")
+        >>> results = evaluate_full_model(model, tokenizer, "GPT-2", tasks=["hellaswag"])
+        >>> print(f"Точность Hellaswag: {results['lm_eval_results']['results']['hellaswag']['acc,none']:.3f}")
+    """
     evaluator_obj = ModelEvaluator(model=model, tokenizer=tokenizer, model_name=model_name)
     return evaluator_obj.run_full_evaluation(tasks, batch_size, save_results)
 
 # Функции для сравнения моделей
 
 def compare_models_basic(model_configs):
-    """Базовое сравнение нескольких моделей (только производительность)."""
+    """
+    Базовое сравнение нескольких моделей - только производительность.
+    
+    Загружает и оценивает несколько моделей по производительности, используя
+    базовую оценку (без тестов точности). Автоматически освобождает память
+    после каждой модели для эффективного использования ресурсов.
+    
+    Args:
+        model_configs (list): Список конфигураций моделей. Каждая конфигурация должна содержать:
+            - name (str): Название модели для идентификации
+            - path (str): Путь к модели (локальный или Hugging Face Hub)
+            - num_samples (int, optional): Количество сэмплов (игнорируется, всегда 5)
+            - tasks (list, optional): Список задач (игнорируется в базовой оценке)
+            - batch_size (int, optional): Размер батча (игнорируется в базовой оценке)
+    
+    Returns:
+        dict: Словарь с результатами базовой оценки для каждой модели:
+            {model_name: results_dict, ...}
+            
+    Note:
+        - Автоматически создает JSON файлы для каждой модели в папке 'results'
+        - Освобождает GPU память после каждой модели
+        - Использует автоматическое определение типа данных и устройства
+        - Выводит прогресс в консоль
+        
+    Example:
+        >>> model_configs = [
+        ...     {"name": "GPT-2", "path": "gpt2"},
+        ...     {"name": "GPT-2 Medium", "path": "gpt2-medium"}
+        ... ]
+        >>> results = compare_models_basic(model_configs)
+        >>> for name, result in results.items():
+        ...     print(f"{name}: {result['generation_speed']:.2f} токенов/сек")
+    """
     results = {}
     
     for config in model_configs:
@@ -630,7 +1033,44 @@ def compare_models_basic(model_configs):
     return results
 
 def compare_models_full(model_configs):
-    """Полное сравнение нескольких моделей (включая точность)."""
+    """
+    Полное сравнение нескольких моделей - включает тесты точности и производительности.
+    
+    Загружает и оценивает несколько моделей комплексно, включая тесты точности
+    на стандартных задачах и измерение скорости генерации. Автоматически освобождает
+    память после каждой модели для эффективного использования ресурсов.
+    
+    Args:
+        model_configs (list): Список конфигураций моделей. Каждая конфигурация должна содержать:
+            - name (str): Название модели для идентификации
+            - path (str): Путь к модели (локальный или Hugging Face Hub)
+            - tasks (list, optional): Список задач для оценки точности. По умолчанию ['hellaswag']
+            - batch_size (int, optional): Размер батча для оценки точности. По умолчанию 4
+            - num_samples (int, optional): Количество сэмплов (игнорируется, всегда 5)
+    
+    Returns:
+        dict: Словарь с результатами полной оценки для каждой модели:
+            {model_name: results_dict, ...}
+            
+    Note:
+        - Автоматически создает JSON файлы для каждой модели в папке 'results'
+        - Освобождает GPU память после каждой модели
+        - Использует автоматическое определение типа данных и устройства
+        - Выводит прогресс в консоль
+        - Может занять значительное время в зависимости от количества задач
+        
+    Example:
+        >>> model_configs = [
+        ...     {"name": "GPT-2", "path": "gpt2", "tasks": ["hellaswag"]},
+        ...     {"name": "GPT-2 Medium", "path": "gpt2-medium", "tasks": ["hellaswag", "gsm8k"]}
+        ... ]
+        >>> results = compare_models_full(model_configs)
+        >>> for name, result in results.items():
+        ...     print(f"{name}: {result['generation_speed']:.2f} токенов/сек")
+        ...     if 'hellaswag' in result['lm_eval_results']['results']:
+        ...         acc = result['lm_eval_results']['results']['hellaswag']['acc,none']
+        ...         print(f"  Hellaswag accuracy: {acc:.3f}")
+    """
     results = {}
     
     for config in model_configs:
