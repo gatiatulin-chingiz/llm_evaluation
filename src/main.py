@@ -235,30 +235,43 @@ class ModelEvaluator:
             json.dump(output_data, f, indent=2, ensure_ascii=False)
         
         self.logger.info(f"Результаты сохранены в {filename}")
+                return filename
+
+    def save_basic_results(self, basic_metrics, filename=None):
+        """Сохранение базовых результатов в JSON"""
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{self.model_name.replace('/', '_')}_basic_evaluation_{timestamp}.json"
+        
+        output_data = {
+            "model": self.model_name,
+            "timestamp": datetime.now().isoformat(),
+            "evaluation_type": "basic",
+            "basic_metrics": basic_metrics
+        }
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(output_data, f, indent=2, ensure_ascii=False)
+        
+        self.logger.info(f"Базовые результаты сохранены в {filename}")
         return filename
-    
-    def run_full_evaluation(self, tasks=["hellaswag", "mmlu", "gsm8k"], batch_size=8, num_samples=10, save_results=True):
+
+    def run_basic_evaluation(self, num_samples=10, save_results=True):
         """
-        Полная оценка модели
+        Базовая оценка модели - только системные и производительные метрики
         
         Args:
-            tasks (list): Список задач для оценки
-            batch_size (int): Размер батча
             num_samples (int): Количество образцов для измерения скорости
             save_results (bool): Сохранять ли результаты в файл
             
         Returns:
-            dict: Словарь с результатами оценки
+            dict: Словарь с базовыми результатами оценки
         """
         try:
-            # Логируем начальные системные ресурсы
-            initial_system_metrics = self.log_system_resources("(начало)")
+            self.logger.info("Запуск базовой оценки модели")
             
-            # 1. Оценка точности (если указаны задачи)
-            eval_time = 0.0
-            results = {}
-            if tasks:
-                results, eval_time = self.evaluate_model(tasks, batch_size)
+            # 1. Логируем начальные системные ресурсы
+            initial_system_metrics = self.log_system_resources("(начало)")
             
             # 2. Замер скорости генерации
             speed_metrics = self.measure_generation_speed(num_samples)
@@ -266,7 +279,73 @@ class ModelEvaluator:
             # 3. Финальные системные метрики
             final_system_metrics = self.log_system_resources("(окончание)")
             
-            # 4. Сбор всех системных метрик
+            # 4. Сбор базовых метрик
+            basic_metrics = {
+                "model_name": self.model_name,
+                "load_time": 0.0,  # Модель уже загружена
+                "evaluation_time": 0.0,  # Нет оценки точности в базовом режиме
+                "generation_speed": speed_metrics['average_tokens_per_second'],
+                "total_tokens_generated": speed_metrics['total_tokens'],
+                "generation_time": speed_metrics["total_time"],
+                "total_time": speed_metrics["total_time"],  # Общее время = время генерации
+                "system_metrics": {
+                    "initial": initial_system_metrics,
+                    "final": final_system_metrics,
+                    "model_load_time": 0.0,
+                    "evaluation_time": 0.0,
+                    "generation_time": speed_metrics["total_time"]
+                },
+                "generation_speed_detailed": speed_metrics
+            }
+            
+            # 5. Сохранение результатов (опционально)
+            result_file = None
+            if save_results:
+                result_file = self.save_basic_results(basic_metrics)
+                basic_metrics["results_file"] = result_file
+            
+            # 6. Вывод базовых метрик
+            self._print_basic_summary(basic_metrics)
+            
+            return basic_metrics
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при базовой оценке: {str(e)}")
+            self.logger.exception("Подробности ошибки:")
+            raise
+
+    def run_full_evaluation(self, tasks=["hellaswag", "mmlu", "gsm8k"], batch_size=8, num_samples=10, save_results=True):
+        """
+        Расширенная оценка модели - включает тесты точности
+        
+        Args:
+            tasks (list): Список задач для оценки точности
+            batch_size (int): Размер батча для задач
+            num_samples (int): Количество образцов для измерения скорости
+            save_results (bool): Сохранять ли результаты в файл
+            
+        Returns:
+            dict: Словарь с полными результатами оценки
+        """
+        try:
+            self.logger.info("Запуск расширенной оценки модели")
+            
+            # 1. Логируем начальные системные ресурсы
+            initial_system_metrics = self.log_system_resources("(начало)")
+            
+            # 2. Оценка точности (если указаны задачи)
+            eval_time = 0.0
+            results = {}
+            if tasks:
+                results, eval_time = self.evaluate_model(tasks, batch_size)
+            
+            # 3. Замер скорости генерации
+            speed_metrics = self.measure_generation_speed(num_samples)
+            
+            # 4. Финальные системные метрики
+            final_system_metrics = self.log_system_resources("(окончание)")
+            
+            # 5. Сбор всех метрик
             system_metrics = {
                 "initial": initial_system_metrics,
                 "final": final_system_metrics,
@@ -275,55 +354,107 @@ class ModelEvaluator:
                 "generation_time": speed_metrics["total_time"]
             }
             
-            # 5. Сохранение результатов (опционально)
+            # 6. Сохранение результатов (опционально)
             result_file = None
             if save_results:
                 result_file = self.save_results(results, eval_time, speed_metrics, system_metrics)
             
-            # 6. Подготовка результатов для возврата
+            # 7. Подготовка результатов для возврата
             evaluation_summary = {
                 "model_name": self.model_name,
                 "load_time": 0.0,  # Модель уже загружена
                 "evaluation_time": eval_time,
                 "generation_speed": speed_metrics['average_tokens_per_second'],
                 "total_tokens_generated": speed_metrics['total_tokens'],
+                "generation_time": speed_metrics["total_time"],
+                "total_time": eval_time + speed_metrics["total_time"],  # Общее время
                 "system_metrics": system_metrics,
                 "results_file": result_file,
                 "lm_eval_results": results,
                 "generation_speed_detailed": speed_metrics
             }
             
-            # 7. Вывод основных метрик
-            self._print_summary(evaluation_summary)
+            # 8. Вывод полных метрик
+            self._print_full_summary(evaluation_summary)
             
             return evaluation_summary
             
         except Exception as e:
-            self.logger.error(f"Ошибка при оценке: {str(e)}")
+            self.logger.error(f"Ошибка при расширенной оценке: {str(e)}")
             self.logger.exception("Подробности ошибки:")
             raise
     
-    def _print_summary(self, summary):
-        """Вывод сводки результатов"""
+    def _print_basic_summary(self, summary):
+        """Вывод базовой сводки результатов"""
         print("\n" + "="*60)
-        print("РЕЗУЛЬТАТЫ ОЦЕНКИ")
+        print("БАЗОВЫЕ РЕЗУЛЬТАТЫ ОЦЕНКИ")
         print("="*60)
         print(f"Модель: {summary['model_name']}")
-        print(f"Время загрузки: {summary['load_time']:.2f} сек (модель предзагружена)")
-        print(f"Время оценки: {summary['evaluation_time']:.2f} сек")
+        print(f"Тип оценки: Базовая (только производительность)")
+        
+        # Временные метрики
+        print(f"\nВРЕМЕННЫЕ МЕТРИКИ:")
+        print(f"  Время загрузки: {summary['load_time']:.2f} сек (модель предзагружена)")
+        print(f"  Время оценки: {summary['evaluation_time']:.2f} сек (нет тестов точности)")
+        print(f"  Время генерации: {summary['generation_time']:.2f} сек")
+        print(f"  Общее время: {summary['total_time']:.2f} сек")
         
         # Системные ресурсы
         final_mem = summary['system_metrics']["final"]["memory"]
+        final_cpu = summary['system_metrics']["final"]["cpu"]
         final_gpu = summary['system_metrics']["final"]["gpu"]
-        print(f"Использование RAM: {final_mem['used_gb']:.1f}/{final_mem['total_gb']:.1f} GB ({final_mem['percent']:.1f}%)")
+        
+        print(f"\nСИСТЕМНЫЕ РЕСУРСЫ:")
+        print(f"  Использование RAM: {final_mem['used_gb']:.1f}/{final_mem['total_gb']:.1f} GB ({final_mem['percent']:.1f}%)")
+        print(f"  Использование CPU: {final_cpu['cpu_avg_percent']:.1f}% (ядер: {final_cpu['cpu_count_logical']})")
         if "error" not in final_gpu:
-            print(f"Использование GPU VRAM: {final_gpu['memory_used_gb']:.1f}/{final_gpu['memory_total_gb']:.1f} GB")
-            print(f"Загрузка GPU: {final_gpu['utilization_percent']:.1f}%")
+            print(f"  Использование GPU VRAM: {final_gpu['memory_used_gb']:.1f}/{final_gpu['memory_total_gb']:.1f} GB")
+            print(f"  Загрузка GPU: {final_gpu['utilization_percent']:.1f}%")
+        else:
+            print(f"  GPU: {final_gpu['error']}")
+        
+        # Производительность
+        print(f"\nПРОИЗВОДИТЕЛЬНОСТЬ:")
+        print(f"  Скорость генерации: {summary['generation_speed']:.2f} токенов/сек")
+        print(f"  Обработано токенов: {summary['total_tokens_generated']}")
+        
+        if summary['results_file']:
+            print(f"\nРезультаты сохранены в: {summary['results_file']}")
+        print("="*60)
+
+    def _print_full_summary(self, summary):
+        """Вывод полной сводки результатов"""
+        print("\n" + "="*60)
+        print("ПОЛНЫЕ РЕЗУЛЬТАТЫ ОЦЕНКИ")
+        print("="*60)
+        print(f"Модель: {summary['model_name']}")
+        print(f"Тип оценки: Расширенная (включая тесты точности)")
+        
+        # Временные метрики
+        print(f"\nВРЕМЕННЫЕ МЕТРИКИ:")
+        print(f"  Время загрузки: {summary['load_time']:.2f} сек (модель предзагружена)")
+        print(f"  Время оценки: {summary['evaluation_time']:.2f} сек")
+        print(f"  Время генерации: {summary['generation_time']:.2f} сек")
+        print(f"  Общее время: {summary['total_time']:.2f} сек")
+        
+        # Системные ресурсы
+        final_mem = summary['system_metrics']["final"]["memory"]
+        final_cpu = summary['system_metrics']["final"]["cpu"]
+        final_gpu = summary['system_metrics']["final"]["gpu"]
+        
+        print(f"\nСИСТЕМНЫЕ РЕСУРСЫ:")
+        print(f"  Использование RAM: {final_mem['used_gb']:.1f}/{final_mem['total_gb']:.1f} GB ({final_mem['percent']:.1f}%)")
+        print(f"  Использование CPU: {final_cpu['cpu_avg_percent']:.1f}% (ядер: {final_cpu['cpu_count_logical']})")
+        if "error" not in final_gpu:
+            print(f"  Использование GPU VRAM: {final_gpu['memory_used_gb']:.1f}/{final_gpu['memory_total_gb']:.1f} GB")
+            print(f"  Загрузка GPU: {final_gpu['utilization_percent']:.1f}%")
+        else:
+            print(f"  GPU: {final_gpu['error']}")
         
         # Точность по задачам
         results = summary['lm_eval_results']
         if results and 'results' in results:
-            print("\nТочность по задачам:")
+            print(f"\nТОЧНОСТЬ ПО ЗАДАЧАМ:")
             for task, metrics in results['results'].items():
                 if 'acc,none' in metrics:
                     acc = metrics['acc,none']
@@ -334,19 +465,22 @@ class ModelEvaluator:
                     stderr = metrics.get('exact_match_stderr,none', 0)
                     print(f"  {task}: {em:.4f} ± {stderr:.4f}")
         
-        # Скорость генерации
-        print(f"\nПроизводительность:")
+        # Производительность
+        print(f"\nПРОИЗВОДИТЕЛЬНОСТЬ:")
         print(f"  Скорость генерации: {summary['generation_speed']:.2f} токенов/сек")
         print(f"  Обработано токенов: {summary['total_tokens_generated']}")
-        print(f"  Время генерации: {summary['generation_speed_detailed']['total_time']:.2f} сек")
-        print(f"  Общее время: {summary['load_time'] + summary['evaluation_time'] + summary['generation_speed_detailed']['total_time']:.2f} сек")
+        
         if summary['results_file']:
-            print(f"  Результаты сохранены в: {summary['results_file']}")
+            print(f"\nРезультаты сохранены в: {summary['results_file']}")
         print("="*60)
+
+    def _print_summary(self, summary):
+        """Вывод сводки результатов (устаревший метод, используйте _print_basic_summary или _print_full_summary)"""
+        self._print_full_summary(summary)
 
 # Функция для удобного использования из Jupyter Notebook
 def evaluate_preloaded_model(model, tokenizer, model_name=None, tasks=["hellaswag", "mmlu", "gsm8k"], 
-                           batch_size=8, num_samples=10, save_results=True):
+                           batch_size=8, num_samples=10, save_results=True, evaluation_type="full"):
     """
     Удобная функция для оценки предзагруженной модели из Jupyter Notebook
     
@@ -358,12 +492,34 @@ def evaluate_preloaded_model(model, tokenizer, model_name=None, tasks=["hellaswa
         batch_size (int): Размер батча (по умолчанию: 8)
         num_samples (int): Количество образцов для измерения скорости (по умолчанию: 10)
         save_results (bool): Сохранять ли результаты в файл (по умолчанию: True)
+        evaluation_type (str): Тип оценки - "basic" или "full" (по умолчанию: "full")
         
     Returns:
         dict: Словарь с результатами оценки
     """
     evaluator_obj = ModelEvaluator(model=model, tokenizer=tokenizer, model_name=model_name)
-    return evaluator_obj.run_full_evaluation(tasks, batch_size, num_samples, save_results)
+    
+    if evaluation_type == "basic":
+        return evaluator_obj.run_basic_evaluation(num_samples, save_results)
+    else:
+        return evaluator_obj.run_full_evaluation(tasks, batch_size, num_samples, save_results)
+
+def evaluate_basic_model(model, tokenizer, model_name=None, num_samples=10, save_results=True):
+    """
+    Базовая оценка модели - только системные и производительные метрики
+    
+    Args:
+        model: Предзагруженная модель (обязательно)
+        tokenizer: Предзагруженный токенизатор (обязательно)
+        model_name (str, optional): Название модели для логирования
+        num_samples (int): Количество образцов для измерения скорости (по умолчанию: 10)
+        save_results (bool): Сохранять ли результаты в файл (по умолчанию: True)
+        
+    Returns:
+        dict: Словарь с базовыми результатами оценки
+    """
+    evaluator_obj = ModelEvaluator(model=model, tokenizer=tokenizer, model_name=model_name)
+    return evaluator_obj.run_basic_evaluation(num_samples, save_results)
 
 """
 ===============================================================================
@@ -397,31 +553,66 @@ model = AutoModelForCausalLM.from_pretrained(
 ЭТАП 2: ОСНОВНЫЕ СПОСОБЫ ОЦЕНКИ
 ===============================================================================
 
-СПОСОБ 1: БЫСТРАЯ ОЦЕНКА (рекомендуется для большинства случаев)
+СПОСОБ 1: БАЗОВАЯ ОЦЕНКА (рекомендуется для быстрой проверки)
 ------------------------------------------------------------------------------
-НАЗНАЧЕНИЕ: Полная оценка модели одной функцией
+НАЗНАЧЕНИЕ: Быстрая оценка только системных и производительных метрик
 ПРЕИМУЩЕСТВА: 
 - Минимум кода
-- Автоматическое выполнение всех этапов
-- Готовые результаты в удобном формате
+- Быстрое выполнение
+- Только основные метрики
+- Не требует дополнительных данных
 
 КОГДА ИСПОЛЬЗОВАТЬ:
-✓ Быстрая оценка модели
-✓ Сравнение нескольких моделей  
+✓ Быстрая проверка производительности
+✓ Сравнение скорости моделей
+✓ Отладка и тестирование
+✓ Когда точность не важна
+
+# Вариант 1A: Базовая оценка через основную функцию
+results = evaluate_preloaded_model(
+    model=model,                    # Предзагруженная модель (ОБЯЗАТЕЛЬНО)
+    tokenizer=tokenizer,            # Предзагруженный токенизатор (ОБЯЗАТЕЛЬНО)
+    model_name="Qwen3-0.6B",        # Название для логирования (опционально)
+    evaluation_type="basic",        # БАЗОВАЯ ОЦЕНКА (без тестов точности)
+    num_samples=10,                 # Образцы для измерения скорости генерации
+    save_results=True               # Сохранить результаты в JSON файл
+)
+
+# Вариант 1B: Базовая оценка через специализированную функцию
+results = evaluate_basic_model(
+    model=model,                    # Предзагруженная модель (ОБЯЗАТЕЛЬНО)
+    tokenizer=tokenizer,            # Предзагруженный токенизатор (ОБЯЗАТЕЛЬНО)
+    model_name="Qwen3-0.6B",        # Название для логирования (опционально)
+    num_samples=10,                 # Образцы для измерения скорости генерации
+    save_results=True               # Сохранить результаты в JSON файл
+)
+
+СПОСОБ 2: РАСШИРЕННАЯ ОЦЕНКА (включает тесты точности)
+------------------------------------------------------------------------------
+НАЗНАЧЕНИЕ: Полная оценка модели с тестами точности
+ПРЕИМУЩЕСТВА: 
+- Полная оценка качества модели
+- Включает все метрики
+- Профессиональная оценка
+
+КОГДА ИСПОЛЬЗОВАТЬ:
+✓ Финальная оценка модели
 ✓ Исследовательские цели
-✓ Когда нужны все метрики сразу
+✓ Сравнение качества моделей
+✓ Когда важна точность
 
 results = evaluate_preloaded_model(
     model=model,                    # Предзагруженная модель (ОБЯЗАТЕЛЬНО)
     tokenizer=tokenizer,            # Предзагруженный токенизатор (ОБЯЗАТЕЛЬНО)
     model_name="Qwen3-0.6B",        # Название для логирования (опционально)
+    evaluation_type="full",         # РАСШИРЕННАЯ ОЦЕНКА (с тестами точности)
     tasks=["hellaswag", "gsm8k"],   # Задачи для оценки точности
     batch_size=4,                   # Размер батча (влияет на память/скорость)
     num_samples=10,                 # Образцы для измерения скорости генерации
     save_results=True               # Сохранить результаты в JSON файл
 )
 
-СПОСОБ 2: ДЕТАЛЬНЫЙ КОНТРОЛЬ (для продвинутых пользователей)
+СПОСОБ 3: ДЕТАЛЬНЫЙ КОНТРОЛЬ (для продвинутых пользователей)
 ------------------------------------------------------------------------------
 НАЗНАЧЕНИЕ: Поэтапная оценка с полным контролем процесса
 ПРЕИМУЩЕСТВА:
@@ -435,19 +626,26 @@ results = evaluate_preloaded_model(
 ✓ Интеграция в сложные пайплайны
 ✓ Когда нужен детальный контроль
 
-# 2.1 Создание оценщика
+# 3.1 Создание оценщика
 evaluator = ModelEvaluator(
     model=model,                    # Предзагруженная модель
     tokenizer=tokenizer,            # Предзагруженный токенизатор
     model_name="Qwen3-0.6B"         # Название для логирования
 )
 
-# 2.2 Этап A: Измерение скорости генерации
+# 3.2 Этап A: Базовая оценка
+# НАЗНАЧЕНИЕ: Только системные и производительные метрики
+basic_results = evaluator.run_basic_evaluation(
+    num_samples=5,                  # Образцы для скорости
+    save_results=False              # Не сохранять в файл
+)
+
+# 3.3 Этап B: Измерение скорости генерации
 # НАЗНАЧЕНИЕ: Определяет токенов/сек
 # ПОЛЕЗНО: Сравнение производительности, оптимизация
 speed_metrics = evaluator.measure_generation_speed(num_samples=5)
 
-# 2.3 Этап B: Полная оценка с настройками
+# 3.4 Этап C: Расширенная оценка с настройками
 # НАЗНАЧЕНИЕ: Все этапы оценки с контролем параметров
 full_results = evaluator.run_full_evaluation(
     tasks=["hellaswag"],            # Задачи для оценки
@@ -479,21 +677,30 @@ if results['lm_eval_results'] and 'results' in results['lm_eval_results']:
 ЭТАП 4: СПЕЦИАЛЬНЫЕ СЦЕНАРИИ
 ===============================================================================
 
-СЦЕНАРИЙ 1: ТОЛЬКО ИЗМЕРЕНИЕ СКОРОСТИ
+СЦЕНАРИЙ 1: БАЗОВАЯ ОЦЕНКА (рекомендуется для большинства случаев)
 ------------------------------------------------------------------------------
-НАЗНАЧЕНИЕ: Быстрая оценка производительности без тестов точности
+НАЗНАЧЕНИЕ: Быстрая оценка системных и производительных метрик
 КОГДА ИСПОЛЬЗОВАТЬ:
-✓ Быстрое сравнение скорости моделей
-✓ Когда точность уже известна
-✓ Оптимизация производительности
-✓ Ограниченные вычислительные ресурсы
+✓ Быстрая проверка модели
+✓ Сравнение производительности
+✓ Отладка и тестирование
+✓ Когда точность не критична
 
-performance_results = evaluate_preloaded_model(
+# Вариант 1A: Через основную функцию
+basic_results = evaluate_preloaded_model(
     model=model,
     tokenizer=tokenizer,
-    tasks=[],                       # Пустой список = пропустить LM Evaluation
-    num_samples=20,                 # Больше образцов для точности
-    save_results=False              # Не сохранять результаты
+    evaluation_type="basic",        # Базовая оценка
+    num_samples=20,                 # Образцы для точного измерения
+    save_results=True               # Сохранить результаты
+)
+
+# Вариант 1B: Через специализированную функцию
+basic_results = evaluate_basic_model(
+    model=model,
+    tokenizer=tokenizer,
+    num_samples=20,                 # Образцы для точного измерения
+    save_results=True               # Сохранить результаты
 )
 
 СЦЕНАРИЙ 2: ТОЛЬКО ОЦЕНКА ТОЧНОСТИ
