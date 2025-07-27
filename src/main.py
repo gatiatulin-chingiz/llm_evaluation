@@ -295,15 +295,16 @@ class ModelEvaluator:
         """
         Замер скорости генерации модели в токенах в секунду.
         
-        Тестирует модель на наборе промптов и измеряет:
+        Тестирует модель на наборе из 5 промптов и измеряет:
         - Время генерации для каждого промпта
         - Количество сгенерированных токенов
         - Скорость генерации (токенов/сек)
         - Сохраняет промпты и ответы модели
         
+        Примечание: Параметр num_samples игнорируется, всегда используется 5 промптов.
+        
         Args:
-            num_samples (int): Количество тестовых промптов для измерения скорости.
-                             Больше образцов = точнее измерение, но дольше выполнение.
+            num_samples (int): Игнорируется, всегда используется 5 промптов.
         
         Returns:
             dict: Словарь с метриками скорости генерации:
@@ -325,12 +326,11 @@ class ModelEvaluator:
             "Что такое математическое ожидание и как его вычислить?"
         ]
         
-        # Повторяем промпты, если нужно больше образцов
-        if num_samples > len(test_prompts):
-            repeats = (num_samples // len(test_prompts)) + 1
-            test_prompts = test_prompts * repeats
+        # Используем только 5 уникальных промптов, независимо от num_samples
+        # Если num_samples > 5, то используем только первые 5 промптов
+        test_prompts = test_prompts[:5]  # Всегда используем только 5 промптов
         
-        test_prompts = test_prompts[:num_samples]  # Обрезаем до нужного количества (5 промптов)
+        self.logger.info(f"Используется {len(test_prompts)} уникальных промптов для оценки")
         
         total_tokens = 0      # Общее количество сгенерированных токенов
         total_time = 0        # Общее время генерации
@@ -341,7 +341,7 @@ class ModelEvaluator:
         for i, prompt in enumerate(test_prompts):
             # Логируем ресурсы каждые 5 итераций для мониторинга
             if i % 5 == 0:
-                self.log_system_resources(f"(генерация {i+1}/{num_samples})")
+                self.log_system_resources(f"(генерация {i+1}/5)")
             
             # Кодируем промпт в токены и перемещаем на нужное устройство
             inputs = self.tokenizer.encode(prompt, return_tensors="pt").to(self.device)
@@ -355,7 +355,15 @@ class ModelEvaluator:
                     max_new_tokens=500,                       # Максимум новых токенов для генерации
                     do_sample=True,                           # Использовать сэмплирование (не жадный поиск)
                     temperature=0.7,                          # Температура для разнообразия ответов
-                    pad_token_id=self.tokenizer.eos_token_id  # Токен окончания последовательности
+                    pad_token_id=self.tokenizer.eos_token_id, # Токен окончания последовательности
+                    repetition_penalty=1.1,                   # Штраф за повторения
+                    no_repeat_ngram_size=3,                   # Запрет повторения n-грамм
+                    early_stopping=True,                      # Остановка при достижении конца
+                    use_cache=True,                           # Использовать кэш для ускорения
+                    return_dict_in_generate=False,            # Возвращать тензор, а не словарь
+                    output_scores=False,                      # Не возвращать логиты
+                    output_hidden_states=False,               # Не возвращать скрытые состояния
+                    output_attentions=False                   # Не возвращать attention веса
                 )
             
             gen_time = time.time() - start_time
@@ -724,12 +732,10 @@ class ModelEvaluator:
                 Пустой список [] = пропустить оценку точности
             batch_size (int): Размер батча для задач оценки точности.
                             Больший размер = быстрее, но больше памяти.
-                            Рекомендуется: 1-2 (экономия памяти), 4-8 (оптимально), 16+ (быстро)
-            num_samples (int): Количество образцов для измерения скорости генерации.
-                             Больше образцов = точнее измерение, но дольше выполнение.
-                             Рекомендуется: 10-50 для быстрой оценки, 100+ для точной.
+                            По умолчанию: 8 (оптимальный баланс)
+            num_samples (int): Игнорируется, всегда используется 5 промптов.
             save_results (bool): Сохранять ли результаты в JSON файл.
-                               True = сохранить, False = только в памяти
+                               По умолчанию: True (сохранить)
         
         Returns:
             dict: Словарь с полными результатами оценки:
@@ -969,9 +975,7 @@ def evaluate_basic_model(model, tokenizer, model_name=None, num_samples=10, save
         tokenizer: Предзагруженный токенизатор (обязательно)
         model_name (str, optional): Название модели для логирования и сохранения результатов.
                                    Если None, используется "preloaded_model"
-        num_samples (int): Количество образцов для измерения скорости генерации.
-                          Больше образцов = точнее измерение, но дольше выполнение.
-                          По умолчанию: 10 (быстрая оценка)
+        num_samples (int): Игнорируется, всегда используется 5 промптов.
         save_results (bool): Сохранять ли результаты в JSON файл.
                            По умолчанию: True (сохранить)
         
@@ -983,12 +987,11 @@ def evaluate_basic_model(model, tokenizer, model_name=None, num_samples=10, save
         Exception: При ошибке во время оценки
     
     Example:
-        # Быстрая оценка производительности модели
+        # Быстрая оценка производительности модели (5 промптов)
         results = evaluate_basic_model(
             model=my_model,
             tokenizer=my_tokenizer,
-            model_name="MyModel",
-            num_samples=20
+            model_name="MyModel"
         )
         print(f"Скорость генерации: {results['generation_speed']:.2f} токенов/сек")
     """
@@ -1028,9 +1031,7 @@ def evaluate_full_model(model, tokenizer, model_name=None, tasks=["hellaswag", "
         batch_size (int): Размер батча для задач оценки точности.
                         Больший размер = быстрее, но больше памяти.
                         По умолчанию: 8 (оптимальный баланс)
-        num_samples (int): Количество образцов для измерения скорости генерации.
-                          Больше образцов = точнее измерение, но дольше выполнение.
-                          По умолчанию: 10 (быстрая оценка)
+        num_samples (int): Игнорируется, всегда используется 5 промптов.
         save_results (bool): Сохранять ли результаты в JSON файл.
                            По умолчанию: True (сохранить)
         
@@ -1042,14 +1043,13 @@ def evaluate_full_model(model, tokenizer, model_name=None, tasks=["hellaswag", "
         Exception: При ошибке во время оценки
     
     Example:
-        # Полная оценка модели с тестами точности
+        # Полная оценка модели с тестами точности (5 промптов)
         results = evaluate_full_model(
             model=my_model,
             tokenizer=my_tokenizer,
             model_name="MyModel",
             tasks=["hellaswag", "gsm8k"],
-            batch_size=4,
-            num_samples=20
+            batch_size=4
         )
         print(f"Точность hellaswag: {results['lm_eval_results']['results']['hellaswag']['acc,none']:.4f}")
         print(f"Скорость генерации: {results['generation_speed']:.2f} токенов/сек")
@@ -1301,7 +1301,7 @@ evaluate_full_model() - Расширенная оценка:
 - model_name: Название модели (опционально)
 - tasks: Список задач для оценки точности (по умолчанию: ["hellaswag", "mmlu", "gsm8k"])
 - batch_size: Размер батча (по умолчанию: 8)
-- num_samples: Образцы для измерения скорости (по умолчанию: 10)
+- num_samples: Игнорируется, всегда используется 5 промптов.
 - save_results: Сохранять результаты (по умолчанию: True)
 
 Доступные задачи (только для расширенной оценки):
