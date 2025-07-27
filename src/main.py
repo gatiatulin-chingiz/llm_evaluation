@@ -26,20 +26,44 @@ from lm_eval import evaluator
 from lm_eval.models.huggingface import HFLM
 
 # Настройка логирования
-# Создаем папку results, если её нет
-results_dir = "results"
-if not os.path.exists(results_dir):
-    os.makedirs(results_dir)
+def setup_logging():
+    """
+    Настройка логирования для модуля.
+    Создает папку results и настраивает логирование в файл и консоль.
+    """
+    # Создаем папку results, если её нет
+    results_dir = "results"
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+    
+    # Настраиваем логирование
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(os.path.join(results_dir, 'model_evaluation.log'), encoding='utf-8'),
+            logging.StreamHandler()
+        ],
+        force=True  # Принудительно перезаписываем настройки логирования
+    )
+    
+    # Получаем логгер для модуля
+    logger = logging.getLogger(__name__)
+    logger.info("Логирование настроено успешно")
+    return logger
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(results_dir, 'model_evaluation.log')),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# Инициализируем логирование при импорте модуля
+logger = setup_logging()
+
+def ensure_logging_setup():
+    """
+    Убеждается, что логирование настроено правильно.
+    Полезно вызывать при импорте модуля в Jupyter Notebook.
+    """
+    global logger
+    logger = setup_logging()
+    logger.info("Логирование проверено и настроено")
+    return logger
 
 class SystemMonitor:
     """
@@ -166,10 +190,19 @@ class ModelEvaluator:
         self.tokenizer = tokenizer            # Предзагруженный токенизатор
         self.model_name = model_name or "preloaded_model"  # Название для логирования
         self.device = "cuda" if torch.cuda.is_available() else "cpu"  # Устройство (GPU/CPU)
-        self.logger = logger                  # Объект логирования
         self.system_monitor = SystemMonitor() # Мониторинг системных ресурсов
         
+        # Убеждаемся, что логирование работает
+        self.logger = logging.getLogger(__name__)
+        if not self.logger.handlers:
+            # Если логгер не настроен, настраиваем его
+            setup_logging()
+            self.logger = logging.getLogger(__name__)
+        
         self.logger.info(f"Инициализирован оценщик для модели: {self.model_name}")
+        self.logger.info(f"Устройство: {self.device}")
+        self.logger.info(f"Токенизатор: {type(self.tokenizer).__name__}")
+        self.logger.info(f"Модель: {type(self.model).__name__}")
         
     def log_system_resources(self, phase=""):
         """
@@ -1043,9 +1076,12 @@ sys.path.append('./src')  # Добавляем путь к модулю main.py
 
 # Импортируем необходимые библиотеки
 from transformers import AutoTokenizer, AutoModelForCausalLM  # Для загрузки моделей
-from main import evaluate_basic_model, evaluate_full_model, ModelEvaluator  # Наши функции оценки
+from main import evaluate_basic_model, evaluate_full_model, ModelEvaluator, ensure_logging_setup  # Наши функции оценки
 
-# 1.2 Загрузка модели и токенизатора
+# 1.2 Убеждаемся, что логирование настроено (важно для Jupyter Notebook)
+ensure_logging_setup()  # Принудительно настраиваем логирование
+
+# 1.3 Загрузка модели и токенизатора
 # Укажите путь к вашей модели (локальный путь или название с Hugging Face)
 model_name = "./Текстовые/Qwen3-0.6B"  # Укажите путь к вашей модели
 
