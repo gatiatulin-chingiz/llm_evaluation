@@ -771,7 +771,7 @@ class ModelEvaluator:
                     "final": final_system_metrics,
                     "model_load_time": 0.0,
                     "evaluation_time": 0.0,
-                    "generation_time": speed_metrics["total_time"]
+                    "generation_time": speed_metrics["sum_total_time"]
                 },
                 "generation_speed_detailed": speed_metrics
             }
@@ -852,7 +852,7 @@ class ModelEvaluator:
                 "final": final_system_metrics,
                 "model_load_time": 0.0,
                 "evaluation_time": eval_time,
-                "generation_time": speed_metrics["total_time"]
+                "generation_time": speed_metrics["sum_total_time"]
             }
             
             result_file = None
