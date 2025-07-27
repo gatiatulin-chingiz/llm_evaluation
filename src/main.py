@@ -297,7 +297,7 @@ class ModelEvaluator:
             repeats = (num_samples // len(test_prompts)) + 1
             test_prompts = test_prompts * repeats
         
-        test_prompts = test_prompts[:num_samples]  # Обрезаем до нужного количества
+        test_prompts = test_prompts[:num_samples]  # Обрезаем до нужного количества (5 промптов)
         
         total_tokens = 0      # Общее количество сгенерированных токенов
         total_time = 0        # Общее время генерации
@@ -318,8 +318,8 @@ class ModelEvaluator:
             # Генерация ответа модели
             with torch.no_grad():  # Отключаем градиенты для экономии памяти
                 outputs = self.model.generate(
-                    inputs,                                    # Входные токены
-                    max_new_tokens=100,                       # Максимум новых токенов для генерации
+                    inputs,                                   # Входные токены
+                    max_new_tokens=500,                       # Максимум новых токенов для генерации
                     do_sample=True,                           # Использовать сэмплирование (не жадный поиск)
                     temperature=0.7,                          # Температура для разнообразия ответов
                     pad_token_id=self.tokenizer.eos_token_id  # Токен окончания последовательности
@@ -407,8 +407,8 @@ class ModelEvaluator:
             "prompts_and_responses": [
                 {
                     "prompt_number": 1,
-                    "prompt": "Реши уравнение: 2x + 5 = 13. Покажи пошаговое решение.",
-                    "response": "Давайте решим это уравнение пошагово...",
+                    "prompt": "Опиши подробно, что такое градиентный спуск и как он работает.",
+                    "response": "Градиентный спуск - это алгоритм оптимизации...",
                     "prompt_tokens": 15,
                     "response_tokens": 45
                 }
@@ -516,8 +516,8 @@ class ModelEvaluator:
             "prompts_and_responses": [
                 {
                     "prompt_number": 1,
-                    "prompt": "Реши уравнение: 2x + 5 = 13. Покажи пошаговое решение.",
-                    "response": "Давайте решим это уравнение пошагово...",
+                    "prompt": "Опиши подробно, что такое градиентный спуск и как он работает.",
+                    "response": "Градиентный спуск - это алгоритм оптимизации...",
                     "prompt_tokens": 15,
                     "response_tokens": 45
                 }
@@ -540,7 +540,7 @@ class ModelEvaluator:
         
         if filename is None:
             # Генерируем имя файла с временной меткой
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d")
             filename = f"{self.model_name.replace('/', '_')}_basic_evaluation_{timestamp}.json"
         
         # Полный путь к файлу в папке results
