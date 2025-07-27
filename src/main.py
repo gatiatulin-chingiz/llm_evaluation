@@ -434,7 +434,7 @@ class ModelEvaluator:
         
         if filename is None:
             # Генерируем имя файла с временной меткой
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d")
             filename = f"{self.model_name.replace('/', '_')}_evaluation_results_{timestamp}.json"
         
         # Полный путь к файлу в папке results
