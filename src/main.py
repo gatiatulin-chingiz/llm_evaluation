@@ -26,17 +26,23 @@ from lm_eval import evaluator
 from lm_eval.models.huggingface import HFLM
 
 # Настройка логирования
-def setup_logging():
+def setup_logging(model_name=None):
     """Настройка логирования для модуля."""
     results_dir = "results"
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
     
+    # Создаем уникальное имя лог-файла для каждой модели
+    if model_name:
+        log_filename = f"{model_name.replace('/', '_')}_evaluation.log"
+    else:
+        log_filename = 'model_evaluation.log'
+    
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(os.path.join(results_dir, 'model_evaluation.log'), encoding='utf-8'),
+            logging.FileHandler(os.path.join(results_dir, log_filename), encoding='utf-8'),
             logging.StreamHandler()
         ],
         force=True
@@ -214,7 +220,9 @@ class ModelEvaluator:
         self.model_name = model_name or "preloaded_model"
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.system_monitor = SystemMonitor()
-        self.logger = logger
+        
+        # Создаем уникальный логгер для этой модели
+        self.logger = setup_logging(self.model_name)
         
         self.logger.info(f"Инициализирован оценщик для модели: {self.model_name}")
         self.logger.info(f"Устройство: {self.device}")
@@ -595,38 +603,31 @@ class ModelEvaluator:
         self.logger.info(f"Результаты сохранены в {filepath}")
         return filepath
 
-    def save_basic_results(self, basic_metrics, filename=None):
+    def save_basic_results_to_txt(self, basic_metrics, filename=None):
         """
-        Сохранение базовых результатов оценки в структурированный JSON файл.
+        Сохранение базовых результатов оценки в текстовый файл.
         
-        Создает JSON файл с результатами базовой оценки, включая только метрики
-        производительности и системные ресурсы (без тестов точности). Файл сохраняется
-        в папку 'results' с автоматически генерируемым именем.
+        Создает txt файл с результатами базовой оценки, содержащий точно такой же
+        вывод, как в консоли. Файл сохраняется в папку 'results' с автоматически
+        генерируемым именем.
         
         Args:
-            basic_metrics (dict): Словарь с базовыми метриками оценки:
-                - model_name (str): Название модели
-                - generation_speed (float): Скорость генерации в токенах/сек
-                - total_tokens_generated (int): Общее количество токенов
-                - generation_time (float): Время генерации в секундах
-                - system_metrics (dict): Системные метрики
-                - generation_speed_detailed (dict): Детальные метрики скорости
+            basic_metrics (dict): Словарь с базовыми метриками оценки
             filename (str, optional): Пользовательское имя файла. Если не указано,
                                     генерируется автоматически в формате:
-                                    "{model_name}_basic_evaluation_{YYYYMMDD}.json"
+                                    "{model_name}_basic_evaluation_{YYYYMMDD}.txt"
         
         Returns:
             str: Путь к сохраненному файлу
             
         Note:
             Создает папку 'results' автоматически, если она не существует.
-            Структура JSON включает только метрики производительности,
-            что делает файл более компактным по сравнению с полной оценкой.
+            Содержимое файла идентично выводу в консоли.
             
         Example:
             >>> evaluator = ModelEvaluator(model, tokenizer, "MyModel")
             >>> basic_metrics = evaluator.run_basic_evaluation(save_results=False)
-            >>> filepath = evaluator.save_basic_results(basic_metrics)
+            >>> filepath = evaluator.save_basic_results_to_txt(basic_metrics)
             >>> print(f"Базовые результаты сохранены в: {filepath}")
         """
         results_dir = "results"
@@ -636,94 +637,33 @@ class ModelEvaluator:
         
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d")
-            filename = f"{self.model_name.replace('/', '_')}_basic_evaluation_{timestamp}.json"
+            filename = f"{self.model_name.replace('/', '_')}_basic_evaluation_{timestamp}.txt"
         
         filepath = os.path.join(results_dir, filename)
         
-        final_system = basic_metrics.get('system_metrics', {}).get('final', {})
+        # Перенаправляем вывод в файл
+        import io
+        import sys
         
-        # Добавляем реальную скорость для каждого промпта
-        prompts_with_speed = []
-        detailed_metrics = basic_metrics.get('generation_speed_detailed', {})
-        for i, prompt_data in enumerate(detailed_metrics.get('prompts_and_responses', [])):
-            prompt_speed = detailed_metrics['speed_measurements'][i] if i < len(detailed_metrics.get('speed_measurements', [])) else 0
-            prompt_data_with_speed = {
-                **prompt_data,
-                "real_speed_tokens_per_sec": {
-                    "value": round(prompt_speed, 2),
-                    "description": f"Реальная скорость генерации для промпта {prompt_data['prompt_number']} в токенах в секунду"
-                },
-                "prompt_tokens": {
-                    "value": prompt_data["prompt_tokens"],
-                    "description": f"Количество токенов во входном промпте {prompt_data['prompt_number']}"
-                },
-                "response_tokens": {
-                    "value": prompt_data["response_tokens"],
-                    "description": f"Количество токенов в ответе модели на промпт {prompt_data['prompt_number']}"
-                }
-            }
-            prompts_with_speed.append(prompt_data_with_speed)
+        # Сохраняем оригинальный stdout
+        original_stdout = sys.stdout
         
-        # Вычисляем среднее время ответа для детальной статистики
-        detailed_stats = basic_metrics.get('generation_speed_detailed', {}).get('detailed_stats', [])
-        avg_response_time = 0
-        if detailed_stats:
-            response_times = [stat['generation_time'] for stat in detailed_stats]
-            avg_response_time = sum(response_times) / len(response_times) if response_times else 0
+        # Создаем StringIO для захвата вывода
+        output_buffer = io.StringIO()
+        sys.stdout = output_buffer
         
-        output_data = {
-            "model_name": basic_metrics['model_name'],
-            "timestamp": datetime.now().isoformat(),
-            "evaluation_type": "basic",
-            "temporal_metrics": {
-                "generation_time_seconds": {
-                    "value": round(basic_metrics['generation_time'], 2),
-                    "description": "Время генерации в секундах"
-                }
-            },
-            "system_resources": {
-                "ram_used_gb": {
-                    "value": round(final_system.get('memory', {}).get('used_gb', 0), 1),
-                    "description": "Использование RAM в ГБ"
-                },
-                "ram_total_gb": {
-                    "value": round(final_system.get('memory', {}).get('total_gb', 0), 1),
-                    "description": "Общий объем RAM в ГБ"
-                },
-                "cpu_percent": {
-                    "value": round(final_system.get('cpu', {}).get('cpu_avg_percent', 0), 1),
-                    "description": "Использование CPU в процентах"
-                },
-                "gpu_vram_used_gb": {
-                    "value": round(final_system.get('gpu', {}).get('memory_used_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
-                    "description": "Использование GPU VRAM в ГБ"
-                },
-                "gpu_vram_total_gb": {
-                    "value": round(final_system.get('gpu', {}).get('memory_total_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
-                    "description": "Общий объем GPU VRAM в ГБ"
-                }
-            },
-            "performance_metrics": {
-                "generation_speed_tokens_per_sec": {
-                    "value": round(basic_metrics['generation_speed'], 2),
-                    "description": "Скорость генерации в токенах в секунду"
-                },
-                "total_tokens_generated": {
-                    "value": basic_metrics['total_tokens_generated'],
-                    "description": "Обработано токенов"
-                }
-            },
-            "detailed_prompt_statistics": {
-                "avg_response_time_seconds": {
-                    "value": round(avg_response_time, 2),
-                    "description": "Среднее время ответа в секундах"
-                },
-                "prompt_details": prompts_with_speed
-            }
-        }
+        # Вызываем метод вывода в консоль
+        self._print_basic_summary(basic_metrics)
         
+        # Получаем захваченный вывод
+        captured_output = output_buffer.getvalue()
+        
+        # Восстанавливаем оригинальный stdout
+        sys.stdout = original_stdout
+        
+        # Записываем в файл
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(output_data, f, indent=2, ensure_ascii=False)
+            f.write(captured_output)
         
         self.logger.info(f"Базовые результаты сохранены в {filepath}")
         return filepath
@@ -758,7 +698,7 @@ class ModelEvaluator:
             
         Note:
             Автоматически выводит сводку результатов в консоль.
-            Если save_results=True, создает JSON файл в папке 'results'.
+            Если save_results=True, создает txt файл в папке 'results'.
             
         Example:
             >>> evaluator = ModelEvaluator(model, tokenizer, "GPT-2")
@@ -786,7 +726,7 @@ class ModelEvaluator:
             
             result_file = None
             if save_results:
-                result_file = self.save_basic_results(basic_metrics)
+                result_file = self.save_basic_results_to_txt(basic_metrics)
                 basic_metrics["results_file"] = result_file
             
             self._print_basic_summary(basic_metrics)
@@ -834,7 +774,7 @@ class ModelEvaluator:
             
         Note:
             Автоматически выводит сводку результатов в консоль.
-            Если save_results=True, создает JSON файл в папке 'results'.
+            Если save_results=True, создает txt файл в папке 'results'.
             Может занять значительное время в зависимости от количества задач.
             
         Example:
@@ -1126,7 +1066,7 @@ def compare_models_basic(model_configs):
             {model_name: results_dict, ...}
             
     Note:
-        - Автоматически создает JSON файлы для каждой модели в папке 'results'
+        - Автоматически создает txt файлы для каждой модели в папке 'results'
         - Освобождает GPU память после каждой модели
         - Использует автоматическое определение типа данных и устройства
         - Выводит прогресс в консоль
@@ -1185,7 +1125,7 @@ def compare_models_full(model_configs):
             {model_name: results_dict, ...}
             
     Note:
-        - Автоматически создает JSON файлы для каждой модели в папке 'results'
+        - Автоматически создает txt файлы для каждой модели в папке 'results'
         - Освобождает GPU память после каждой модели
         - Использует автоматическое определение типа данных и устройства
         - Выводит прогресс в консоль
