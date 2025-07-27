@@ -641,28 +641,6 @@ class ModelEvaluator:
         filepath = os.path.join(results_dir, filename)
         
         final_system = basic_metrics.get('system_metrics', {}).get('final', {})
-        system_summary = {
-            'ram_used_gb': {
-                'value': round(final_system.get('memory', {}).get('used_gb', 0), 1),
-                'description': 'Используемая оперативная память в гигабайтах'
-            },
-            'ram_total_gb': {
-                'value': round(final_system.get('memory', {}).get('total_gb', 0), 1),
-                'description': 'Общий объем оперативной памяти в гигабайтах'
-            },
-            'cpu_percent': {
-                'value': round(final_system.get('cpu', {}).get('cpu_avg_percent', 0), 1),
-                'description': 'Средняя загрузка процессора в процентах'
-            },
-            'gpu_vram_used_gb': {
-                'value': round(final_system.get('gpu', {}).get('memory_used_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
-                'description': 'Используемая видеопамять GPU в гигабайтах'
-            },
-            'gpu_vram_total_gb': {
-                'value': round(final_system.get('gpu', {}).get('memory_total_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
-                'description': 'Общий объем видеопамяти GPU в гигабайтах'
-            }
-        }
         
         # Добавляем реальную скорость для каждого промпта
         prompts_with_speed = []
@@ -690,22 +668,43 @@ class ModelEvaluator:
             "model_name": basic_metrics['model_name'],
             "timestamp": datetime.now().isoformat(),
             "evaluation_type": "basic",
-            "evaluation_summary": {
-                "avg_generation_speed_tokens_per_sec": {
+            "basic_metrics": {
+                "generation_speed_tokens_per_sec": {
                     "value": round(basic_metrics['generation_speed'], 2),
-                    "description": "Средняя скорость генерации текста в токенах в секунду по всем промптам"
+                    "description": "Скорость генерации в токенах в секунду"
                 },
-                "sum_total_tokens_generated": {
+                "total_tokens_generated": {
                     "value": basic_metrics['total_tokens_generated'],
-                    "description": "Общее количество сгенерированных токенов по всем промптам"
+                    "description": "Обработано токенов"
                 },
-                "sum_total_generation_time_seconds": {
+                "generation_time_seconds": {
                     "value": round(basic_metrics['generation_time'], 2),
-                    "description": "Общее время генерации текста по всем промптам в секундах"
+                    "description": "Время генерации в секундах"
                 }
             },
-            "system_summary": system_summary,
-            "prompts_and_responses": prompts_with_speed
+            "system_resources": {
+                "ram_used_gb": {
+                    "value": round(final_system.get('memory', {}).get('used_gb', 0), 1),
+                    "description": "Использование RAM в ГБ"
+                },
+                "ram_total_gb": {
+                    "value": round(final_system.get('memory', {}).get('total_gb', 0), 1),
+                    "description": "Общий объем RAM в ГБ"
+                },
+                "cpu_percent": {
+                    "value": round(final_system.get('cpu', {}).get('cpu_avg_percent', 0), 1),
+                    "description": "Использование CPU в процентах"
+                },
+                "gpu_vram_used_gb": {
+                    "value": round(final_system.get('gpu', {}).get('memory_used_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
+                    "description": "Использование GPU VRAM в ГБ"
+                },
+                "gpu_vram_total_gb": {
+                    "value": round(final_system.get('gpu', {}).get('memory_total_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
+                    "description": "Общий объем GPU VRAM в ГБ"
+                }
+            },
+            "detailed_prompt_stats": prompts_with_speed
         }
         
         with open(filepath, 'w', encoding='utf-8') as f:
@@ -760,18 +759,12 @@ class ModelEvaluator:
             
             basic_metrics = {
                 "model_name": self.model_name,
-                "load_time": 0.0,
-                "evaluation_time": 0.0,
                 "generation_speed": speed_metrics['avg_tokens_per_second'],
                 "total_tokens_generated": speed_metrics['sum_total_tokens'],
                 "generation_time": speed_metrics["sum_total_time"],
-                "total_time": speed_metrics["sum_total_time"],
                 "system_metrics": {
                     "initial": initial_system_metrics,
-                    "final": final_system_metrics,
-                    "model_load_time": 0.0,
-                    "evaluation_time": 0.0,
-                    "generation_time": speed_metrics["sum_total_time"]
+                    "final": final_system_metrics
                 },
                 "generation_speed_detailed": speed_metrics
             }
@@ -903,10 +896,7 @@ class ModelEvaluator:
         
         # Временные метрики
         print(f"\nВРЕМЕННЫЕ МЕТРИКИ:")
-        print(f"  Время загрузки: {summary['load_time']:.2f} сек (модель предзагружена)")
-        print(f"  Время оценки: {summary['evaluation_time']:.2f} сек (нет тестов точности)")
         print(f"  Время генерации: {summary['generation_time']:.2f} сек")
-        print(f"  Общее время: {summary['total_time']:.2f} сек")
         
         # Системные ресурсы (финальные значения)
         final_mem = summary['system_metrics']["final"]["memory"]
@@ -914,11 +904,10 @@ class ModelEvaluator:
         final_gpu = summary['system_metrics']["final"]["gpu"]
         
         print(f"\nСИСТЕМНЫЕ РЕСУРСЫ:")
-        print(f"  Использование RAM: {final_mem['used_gb']:.1f}/{final_mem['total_gb']:.1f} GB ({final_mem['percent']:.1f}%)")
-        print(f"  Использование CPU: {final_cpu['cpu_avg_percent']:.1f}% (ядер: {final_cpu['cpu_count_logical']})")
+        print(f"  Использование RAM: {final_mem['used_gb']:.1f}/{final_mem['total_gb']:.1f} GB")
+        print(f"  Использование CPU: {final_cpu['cpu_avg_percent']:.1f}%")
         if "error" not in final_gpu:
             print(f"  Использование GPU VRAM: {final_gpu['memory_used_gb']:.1f}/{final_gpu['memory_total_gb']:.1f} GB")
-            print(f"  Загрузка GPU: {final_gpu['utilization_percent']:.1f}%")
         else:
             print(f"  GPU: {final_gpu['error']}")
         
