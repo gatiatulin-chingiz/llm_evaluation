@@ -664,19 +664,18 @@ class ModelEvaluator:
             }
             prompts_with_speed.append(prompt_data_with_speed)
         
+        # Вычисляем среднее время ответа для детальной статистики
+        detailed_stats = basic_metrics.get('generation_speed_detailed', {}).get('detailed_stats', [])
+        avg_response_time = 0
+        if detailed_stats:
+            response_times = [stat['generation_time'] for stat in detailed_stats]
+            avg_response_time = sum(response_times) / len(response_times) if response_times else 0
+        
         output_data = {
             "model_name": basic_metrics['model_name'],
             "timestamp": datetime.now().isoformat(),
             "evaluation_type": "basic",
-            "basic_metrics": {
-                "generation_speed_tokens_per_sec": {
-                    "value": round(basic_metrics['generation_speed'], 2),
-                    "description": "Скорость генерации в токенах в секунду"
-                },
-                "total_tokens_generated": {
-                    "value": basic_metrics['total_tokens_generated'],
-                    "description": "Обработано токенов"
-                },
+            "temporal_metrics": {
                 "generation_time_seconds": {
                     "value": round(basic_metrics['generation_time'], 2),
                     "description": "Время генерации в секундах"
@@ -704,7 +703,23 @@ class ModelEvaluator:
                     "description": "Общий объем GPU VRAM в ГБ"
                 }
             },
-            "detailed_prompt_stats": prompts_with_speed
+            "performance_metrics": {
+                "generation_speed_tokens_per_sec": {
+                    "value": round(basic_metrics['generation_speed'], 2),
+                    "description": "Скорость генерации в токенах в секунду"
+                },
+                "total_tokens_generated": {
+                    "value": basic_metrics['total_tokens_generated'],
+                    "description": "Обработано токенов"
+                }
+            },
+            "detailed_prompt_statistics": {
+                "avg_response_time_seconds": {
+                    "value": round(avg_response_time, 2),
+                    "description": "Среднее время ответа в секундах"
+                },
+                "prompt_details": prompts_with_speed
+            }
         }
         
         with open(filepath, 'w', encoding='utf-8') as f:
