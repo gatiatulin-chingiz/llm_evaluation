@@ -19,17 +19,23 @@ import json
 import logging
 import psutil
 import GPUtil
+import os
 from datetime import datetime
 import torch
 from lm_eval import evaluator
 from lm_eval.models.huggingface import HFLM
 
 # Настройка логирования
+# Создаем папку results, если её нет
+results_dir = "results"
+if not os.path.exists(results_dir):
+    os.makedirs(results_dir)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('model_evaluation.log'),
+        logging.FileHandler(os.path.join(results_dir, 'model_evaluation.log')),
         logging.StreamHandler()
     ]
 )
@@ -350,13 +356,36 @@ class ModelEvaluator:
     
     def save_results(self, results, eval_time, speed_metrics, system_metrics, filename=None):
         """
-        Сохранение полных результатов оценки в JSON файл.
+        Сохранение упрощенных результатов оценки в JSON файл.
         
-        Сохраняет все метрики оценки включая:
-        - Результаты тестов точности (lm_eval_results)
-        - Метрики скорости генерации
-        - Системные метрики (CPU, RAM, GPU)
-        - Временные метрики
+        Сохраняет только самые важные метрики:
+        - Основная информация о модели
+        - Ключевые метрики производительности
+        - Результаты точности по задачам
+        - Краткие системные метрики
+        
+        Структура выходного JSON:
+        {
+            "model_name": "Qwen3-0.6B",
+            "timestamp": "2024-01-15T10:30:45",
+            "evaluation_summary": {
+                "evaluation_time_seconds": 120.5,
+                "generation_speed_tokens_per_sec": 15.2,
+                "total_tokens_generated": 1520,
+                "total_generation_time_seconds": 100.0
+            },
+            "accuracy_results": {
+                "hellaswag": {"accuracy": 0.7523, "stderr": 0.0123},
+                "gsm8k": {"exact_match": 0.2345, "stderr": 0.0234}
+            },
+            "system_summary": {
+                "ram_used_gb": 8.5,
+                "ram_total_gb": 16.0,
+                "cpu_percent": 45.2,
+                "gpu_vram_used_gb": 4.2,
+                "gpu_vram_total_gb": 8.0
+            }
+        }
         
         Args:
             results (dict): Результаты оценки точности от lm-eval
@@ -369,36 +398,93 @@ class ModelEvaluator:
         Returns:
             str: Путь к сохраненному файлу
         """
+        # Создаем папку results, если её нет
+        results_dir = "results"
+        if not os.path.exists(results_dir):
+            os.makedirs(results_dir)
+            self.logger.info(f"Создана папка {results_dir}")
+        
         if filename is None:
             # Генерируем имя файла с временной меткой
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{self.model_name.replace('/', '_')}_evaluation_results_{timestamp}.json"
         
-        # Структура данных для сохранения
+        # Полный путь к файлу в папке results
+        filepath = os.path.join(results_dir, filename)
+        
+        # Извлекаем только важные результаты точности
+        accuracy_results = {}
+        if results and 'results' in results:
+            for task, metrics in results['results'].items():
+                if 'acc,none' in metrics:
+                    accuracy_results[task] = {
+                        'accuracy': round(metrics['acc,none'], 4),
+                        'stderr': round(metrics.get('acc_stderr,none', 0), 4)
+                    }
+                elif 'exact_match,none' in metrics:
+                    accuracy_results[task] = {
+                        'exact_match': round(metrics['exact_match,none'], 4),
+                        'stderr': round(metrics.get('exact_match_stderr,none', 0), 4)
+                    }
+        
+        # Краткие системные метрики (только финальные)
+        final_system = system_metrics.get('final', {})
+        system_summary = {
+            'ram_used_gb': round(final_system.get('memory', {}).get('used_gb', 0), 1),
+            'ram_total_gb': round(final_system.get('memory', {}).get('total_gb', 0), 1),
+            'cpu_percent': round(final_system.get('cpu', {}).get('cpu_avg_percent', 0), 1),
+            'gpu_vram_used_gb': round(final_system.get('gpu', {}).get('memory_used_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
+            'gpu_vram_total_gb': round(final_system.get('gpu', {}).get('memory_total_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0
+        }
+        
+        # Упрощенная структура данных для сохранения
         output_data = {
-            "model": self.model_name,                    # Название модели
-            "timestamp": datetime.now().isoformat(),     # Временная метка
-            "system_info": system_metrics,               # Системные метрики
-            "evaluation_time_seconds": eval_time,        # Время оценки
-            "lm_eval_results": results,                  # Результаты тестов точности
-            "generation_speed": speed_metrics            # Метрики скорости генерации
+            "model_name": self.model_name,
+            "timestamp": datetime.now().isoformat(),
+            "evaluation_summary": {
+                "evaluation_time_seconds": round(eval_time, 2),
+                "generation_speed_tokens_per_sec": round(speed_metrics['average_tokens_per_second'], 2),
+                "total_tokens_generated": speed_metrics['total_tokens'],
+                "total_generation_time_seconds": round(speed_metrics['total_time'], 2)
+            },
+            "accuracy_results": accuracy_results,
+            "system_summary": system_summary
         }
         
         # Сохранение в JSON файл с отступами для читаемости
-        with open(filename, 'w', encoding='utf-8') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(output_data, f, indent=2, ensure_ascii=False)
         
-        self.logger.info(f"Результаты сохранены в {filename}")
-        return filename
+        self.logger.info(f"Упрощенные результаты сохранены в {filepath}")
+        return filepath
 
     def save_basic_results(self, basic_metrics, filename=None):
         """
-        Сохранение базовых результатов оценки в JSON файл.
+        Сохранение упрощенных базовых результатов оценки в JSON файл.
         
-        Сохраняет только базовые метрики (без тестов точности):
-        - Системные метрики
-        - Метрики скорости генерации
-        - Временные метрики
+        Сохраняет только самые важные метрики базовой оценки:
+        - Основная информация о модели
+        - Ключевые метрики производительности
+        - Краткие системные метрики
+        
+        Структура выходного JSON:
+        {
+            "model_name": "Qwen3-0.6B",
+            "timestamp": "2024-01-15T10:30:45",
+            "evaluation_type": "basic",
+            "evaluation_summary": {
+                "generation_speed_tokens_per_sec": 15.2,
+                "total_tokens_generated": 1520,
+                "total_generation_time_seconds": 100.0
+            },
+            "system_summary": {
+                "ram_used_gb": 8.5,
+                "ram_total_gb": 16.0,
+                "cpu_percent": 45.2,
+                "gpu_vram_used_gb": 4.2,
+                "gpu_vram_total_gb": 8.0
+            }
+        }
         
         Args:
             basic_metrics (dict): Базовые метрики оценки
@@ -408,25 +494,49 @@ class ModelEvaluator:
         Returns:
             str: Путь к сохраненному файлу
         """
+        # Создаем папку results, если её нет
+        results_dir = "results"
+        if not os.path.exists(results_dir):
+            os.makedirs(results_dir)
+            self.logger.info(f"Создана папка {results_dir}")
+        
         if filename is None:
             # Генерируем имя файла с временной меткой
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{self.model_name.replace('/', '_')}_basic_evaluation_{timestamp}.json"
         
-        # Структура данных для сохранения базовых результатов
+        # Полный путь к файлу в папке results
+        filepath = os.path.join(results_dir, filename)
+        
+        # Краткие системные метрики (только финальные)
+        final_system = basic_metrics.get('system_metrics', {}).get('final', {})
+        system_summary = {
+            'ram_used_gb': round(final_system.get('memory', {}).get('used_gb', 0), 1),
+            'ram_total_gb': round(final_system.get('memory', {}).get('total_gb', 0), 1),
+            'cpu_percent': round(final_system.get('cpu', {}).get('cpu_avg_percent', 0), 1),
+            'gpu_vram_used_gb': round(final_system.get('gpu', {}).get('memory_used_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0,
+            'gpu_vram_total_gb': round(final_system.get('gpu', {}).get('memory_total_gb', 0), 1) if 'error' not in final_system.get('gpu', {}) else 0
+        }
+        
+        # Упрощенная структура данных для сохранения базовых результатов
         output_data = {
-            "model": self.model_name,                    # Название модели
-            "timestamp": datetime.now().isoformat(),     # Временная метка
-            "evaluation_type": "basic",                  # Тип оценки (базовая)
-            "basic_metrics": basic_metrics               # Базовые метрики
+            "model_name": basic_metrics['model_name'],
+            "timestamp": datetime.now().isoformat(),
+            "evaluation_type": "basic",
+            "evaluation_summary": {
+                "generation_speed_tokens_per_sec": round(basic_metrics['generation_speed'], 2),
+                "total_tokens_generated": basic_metrics['total_tokens_generated'],
+                "total_generation_time_seconds": round(basic_metrics['generation_time'], 2)
+            },
+            "system_summary": system_summary
         }
         
         # Сохранение в JSON файл с отступами для читаемости
-        with open(filename, 'w', encoding='utf-8') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(output_data, f, indent=2, ensure_ascii=False)
         
-        self.logger.info(f"Базовые результаты сохранены в {filename}")
-        return filename
+        self.logger.info(f"Упрощенные базовые результаты сохранены в {filepath}")
+        return filepath
 
     def run_basic_evaluation(self, num_samples=10, save_results=True):
         """
