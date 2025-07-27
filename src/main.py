@@ -348,11 +348,11 @@ class ModelEvaluator:
         self.log_system_resources("(перед генерацией)")
         
         test_prompts = [
-            "Опиши подробно, что такое градиентный спуск и как он работает.",
-            "Игральную кость с 6 гранями бросают дважды. Найдите вероятность того, что оба раза выпало число, большее 3.",
-            "Какие полисы в страховании можно считать убыточными?",
-            "Объясни принцип работы франшизы в автостраховании и её влияние на стоимость полиса.",
-            "Что такое математическое ожидание и как его вычислить?"
+            "Объясни, что такое градиентный спуск и как он работает в машинном обучении.",
+            "Вычисли вероятность того, что при двух бросках игральной кости оба раза выпадет число больше 3.",
+            "Какие страховые полисы считаются убыточными для страховой компании?",
+            "Как работает франшиза в автостраховании и как она влияет на стоимость полиса?",
+            "Объясни понятие математического ожидания и покажи, как его вычислять."
         ]
         
         self.logger.info(f"Используется {len(test_prompts)} уникальных промптов для оценки")
@@ -375,20 +375,42 @@ class ModelEvaluator:
                     inputs,
                     max_new_tokens=500,
                     do_sample=True,
-                    temperature=0.7,
+                    temperature=0.3,  # Снижена температура для более детерминированных ответов
+                    top_p=0.9,  # Добавлен top_p для лучшего контроля
+                    top_k=50,   # Добавлен top_k для ограничения выбора токенов
                     pad_token_id=self.tokenizer.eos_token_id,
-                    repetition_penalty=1.1,
-                    no_repeat_ngram_size=3,
+                    repetition_penalty=1.2,  # Увеличен штраф за повторения
+                    no_repeat_ngram_size=5,  # Увеличен размер n-грамм
                     early_stopping=True,
                     use_cache=True,
                     return_dict_in_generate=False,
                     output_scores=False,
                     output_hidden_states=False,
-                    output_attentions=False
+                    output_attentions=False,
+                    eos_token_id=self.tokenizer.eos_token_id,  # Явно указан токен конца
+                    bos_token_id=self.tokenizer.bos_token_id if hasattr(self.tokenizer, 'bos_token_id') else None
                 )
             
             gen_time = time.time() - start_time
             model_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            # Убираем повторение промпта из ответа
+            if model_response.startswith(prompt):
+                model_response = model_response[len(prompt):].strip()
+            
+            # Убираем лишние маркеры и форматирование
+            model_response = model_response.replace("### Ответ:", "").replace("###", "").strip()
+            model_response = model_response.replace("**Предварительные условия:**", "").strip()
+            model_response = model_response.replace("**Ответ должен быть в формате текста.**", "").strip()
+            
+            # Ограничиваем длину ответа, если он слишком длинный
+            if len(model_response) > 2000:
+                # Ищем естественную точку остановки (конец предложения)
+                sentences = model_response.split('.')
+                if len(sentences) > 3:
+                    model_response = '. '.join(sentences[:3]) + '.'
+                else:
+                    model_response = model_response[:2000] + "..."
             
             new_tokens = outputs.shape[1] - inputs.shape[1]
             tokens_per_sec = new_tokens / gen_time
