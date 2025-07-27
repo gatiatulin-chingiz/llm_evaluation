@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Скрипт для оценки Qwen на Tesla V100 с логированием результатов и системных метрик
+Скрипт для оценки моделей с логированием результатов и системных метрик
+Поддерживает использование только с предзагруженными моделью и токенизатором
 """
 
 import time
@@ -9,7 +10,6 @@ import logging
 import psutil
 import GPUtil
 from datetime import datetime
-from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 from lm_eval import evaluator
 from lm_eval.models.huggingface import HFLM
@@ -19,7 +19,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('qwen_evaluation.log'),
+        logging.FileHandler('model_evaluation.log'),
         logging.StreamHandler()
     ]
 )
@@ -70,12 +70,27 @@ class SystemMonitor:
             return {"error": "GPU info not available"}
         return {"error": "No GPUs found"}
 
-class QwenEvaluator:
-    def __init__(self, model_name="Qwen/Qwen1.5-7B-Chat"):
-        self.model_name = model_name
+class ModelEvaluator:
+    def __init__(self, model, tokenizer, model_name=None):
+        """
+        Инициализация оценщика модели
+        
+        Args:
+            model: Предзагруженная модель (обязательно)
+            tokenizer: Предзагруженный токенизатор (обязательно)
+            model_name (str, optional): Название модели для логирования и сохранения результатов
+        """
+        if model is None or tokenizer is None:
+            raise ValueError("model и tokenizer должны быть переданы (не None)")
+        
+        self.model = model
+        self.tokenizer = tokenizer
+        self.model_name = model_name or "preloaded_model"
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.logger = logger
         self.system_monitor = SystemMonitor()
+        
+        self.logger.info(f"Инициализирован оценщик для модели: {self.model_name}")
         
     def log_system_resources(self, phase=""):
         """Логирование системных ресурсов"""
@@ -99,38 +114,6 @@ class QwenEvaluator:
             "memory": memory_info,
             "gpu": gpu_info
         }
-    
-    def load_model(self):
-        """Загрузка модели с оптимизациями для V100"""
-        start_time = time.time()
-        
-        self.logger.info(f"Загрузка модели {self.model_name}...")
-        self.log_system_resources("(до загрузки модели)")
-        
-        # Оптимизации для Tesla V100 (32GB VRAM)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_name,
-            torch_dtype=torch.float16,  # Используем float16 для экономии памяти
-            device_map="auto",
-            low_cpu_mem_usage=True
-        )
-        
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        
-        load_time = time.time() - start_time
-        self.logger.info(f"Модель загружена за {load_time:.2f} секунд")
-        self.log_system_resources("(после загрузки модели)")
-        
-        # Информация о памяти PyTorch
-        if torch.cuda.is_available():
-            gpu_name = torch.cuda.get_device_name(0)
-            memory_allocated = torch.cuda.memory_allocated(0) / 1024**3
-            memory_reserved = torch.cuda.memory_reserved(0) / 1024**3
-            self.logger.info(f"PyTorch GPU: {gpu_name}")
-            self.logger.info(f"PyTorch выделено VRAM: {memory_allocated:.2f} GB")
-            self.logger.info(f"PyTorch зарезервировано VRAM: {memory_reserved:.2f} GB")
-        
-        return load_time
     
     def evaluate_model(self, tasks=["hellaswag", "mmlu", "gsm8k"], batch_size=8):
         """Оценка модели с помощью LM Evaluation Harness"""
@@ -237,7 +220,7 @@ class QwenEvaluator:
         """Сохранение результатов в JSON"""
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"qwen_evaluation_results_{timestamp}.json"
+            filename = f"{self.model_name.replace('/', '_')}_evaluation_results_{timestamp}.json"
         
         output_data = {
             "model": self.model_name,
@@ -253,61 +236,93 @@ class QwenEvaluator:
         
         self.logger.info(f"Результаты сохранены в {filename}")
         return filename
-
-def main():
-    # Параметры для Tesla V100 (32GB)
-    MODEL_NAME = "Qwen/Qwen1.5-7B-Chat"
-    BATCH_SIZE = 8  # Оптимальный размер батча для V100
-    TASKS = ["hellaswag", "mmlu", "gsm8k", "arc_easy"]
     
-    evaluator_obj = QwenEvaluator(MODEL_NAME)
+    def run_full_evaluation(self, tasks=["hellaswag", "mmlu", "gsm8k"], batch_size=8, num_samples=10, save_results=True):
+        """
+        Полная оценка модели
+        
+        Args:
+            tasks (list): Список задач для оценки
+            batch_size (int): Размер батча
+            num_samples (int): Количество образцов для измерения скорости
+            save_results (bool): Сохранять ли результаты в файл
+            
+        Returns:
+            dict: Словарь с результатами оценки
+        """
+        try:
+            # Логируем начальные системные ресурсы
+            initial_system_metrics = self.log_system_resources("(начало)")
+            
+            # 1. Оценка точности (если указаны задачи)
+            eval_time = 0.0
+            results = {}
+            if tasks:
+                results, eval_time = self.evaluate_model(tasks, batch_size)
+            
+            # 2. Замер скорости генерации
+            speed_metrics = self.measure_generation_speed(num_samples)
+            
+            # 3. Финальные системные метрики
+            final_system_metrics = self.log_system_resources("(окончание)")
+            
+            # 4. Сбор всех системных метрик
+            system_metrics = {
+                "initial": initial_system_metrics,
+                "final": final_system_metrics,
+                "model_load_time": 0.0,  # Модель уже загружена
+                "evaluation_time": eval_time,
+                "generation_time": speed_metrics["total_time"]
+            }
+            
+            # 5. Сохранение результатов (опционально)
+            result_file = None
+            if save_results:
+                result_file = self.save_results(results, eval_time, speed_metrics, system_metrics)
+            
+            # 6. Подготовка результатов для возврата
+            evaluation_summary = {
+                "model_name": self.model_name,
+                "load_time": 0.0,  # Модель уже загружена
+                "evaluation_time": eval_time,
+                "generation_speed": speed_metrics['average_tokens_per_second'],
+                "total_tokens_generated": speed_metrics['total_tokens'],
+                "system_metrics": system_metrics,
+                "results_file": result_file,
+                "lm_eval_results": results,
+                "generation_speed_detailed": speed_metrics
+            }
+            
+            # 7. Вывод основных метрик
+            self._print_summary(evaluation_summary)
+            
+            return evaluation_summary
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при оценке: {str(e)}")
+            self.logger.exception("Подробности ошибки:")
+            raise
     
-    try:
-        # Логируем начальные системные ресурсы
-        initial_system_metrics = evaluator_obj.log_system_resources("(начало)")
-        
-        # 1. Загрузка модели
-        load_time = evaluator_obj.load_model()
-        
-        # 2. Оценка точности
-        results, eval_time = evaluator_obj.evaluate_model(TASKS, BATCH_SIZE)
-        
-        # 3. Замер скорости генерации
-        speed_metrics = evaluator_obj.measure_generation_speed(num_samples=10)
-        
-        # 4. Финальные системные метрики
-        final_system_metrics = evaluator_obj.log_system_resources("(окончание)")
-        
-        # 5. Сбор всех системных метрик
-        system_metrics = {
-            "initial": initial_system_metrics,
-            "final": final_system_metrics,
-            "model_load_time": load_time,
-            "evaluation_time": eval_time,
-            "generation_time": speed_metrics["total_time"]
-        }
-        
-        # 6. Сохранение результатов
-        result_file = evaluator_obj.save_results(results, eval_time, speed_metrics, system_metrics)
-        
-        # 7. Вывод основных метрик
+    def _print_summary(self, summary):
+        """Вывод сводки результатов"""
         print("\n" + "="*60)
         print("РЕЗУЛЬТАТЫ ОЦЕНКИ")
         print("="*60)
-        print(f"Модель: {MODEL_NAME}")
-        print(f"Время загрузки: {load_time:.2f} сек")
-        print(f"Время оценки: {eval_time:.2f} сек")
+        print(f"Модель: {summary['model_name']}")
+        print(f"Время загрузки: {summary['load_time']:.2f} сек (модель предзагружена)")
+        print(f"Время оценки: {summary['evaluation_time']:.2f} сек")
         
         # Системные ресурсы
-        final_mem = final_system_metrics["memory"]
-        final_gpu = final_system_metrics["gpu"]
+        final_mem = summary['system_metrics']["final"]["memory"]
+        final_gpu = summary['system_metrics']["final"]["gpu"]
         print(f"Использование RAM: {final_mem['used_gb']:.1f}/{final_mem['total_gb']:.1f} GB ({final_mem['percent']:.1f}%)")
         if "error" not in final_gpu:
             print(f"Использование GPU VRAM: {final_gpu['memory_used_gb']:.1f}/{final_gpu['memory_total_gb']:.1f} GB")
             print(f"Загрузка GPU: {final_gpu['utilization_percent']:.1f}%")
         
         # Точность по задачам
-        if 'results' in results:
+        results = summary['lm_eval_results']
+        if results and 'results' in results:
             print("\nТочность по задачам:")
             for task, metrics in results['results'].items():
                 if 'acc,none' in metrics:
@@ -321,17 +336,262 @@ def main():
         
         # Скорость генерации
         print(f"\nПроизводительность:")
-        print(f"  Скорость генерации: {speed_metrics['average_tokens_per_second']:.2f} токенов/сек")
-        print(f"  Обработано токенов: {speed_metrics['total_tokens']}")
-        print(f"  Время генерации: {speed_metrics['total_time']:.2f} сек")
-        print(f"  Общее время: {load_time + eval_time + speed_metrics['total_time']:.2f} сек")
-        print(f"  Результаты сохранены в: {result_file}")
+        print(f"  Скорость генерации: {summary['generation_speed']:.2f} токенов/сек")
+        print(f"  Обработано токенов: {summary['total_tokens_generated']}")
+        print(f"  Время генерации: {summary['generation_speed_detailed']['total_time']:.2f} сек")
+        print(f"  Общее время: {summary['load_time'] + summary['evaluation_time'] + summary['generation_speed_detailed']['total_time']:.2f} сек")
+        if summary['results_file']:
+            print(f"  Результаты сохранены в: {summary['results_file']}")
         print("="*60)
-        
-    except Exception as e:
-        logger.error(f"Ошибка при оценке: {str(e)}")
-        logger.exception("Подробности ошибки:")
-        raise
 
-if __name__ == "__main__":
-    main()
+# Функция для удобного использования из Jupyter Notebook
+def evaluate_preloaded_model(model, tokenizer, model_name=None, tasks=["hellaswag", "mmlu", "gsm8k"], 
+                           batch_size=8, num_samples=10, save_results=True):
+    """
+    Удобная функция для оценки предзагруженной модели из Jupyter Notebook
+    
+    Args:
+        model: Предзагруженная модель (обязательно)
+        tokenizer: Предзагруженный токенизатор (обязательно)
+        model_name (str, optional): Название модели для логирования и сохранения результатов
+        tasks (list): Список задач для оценки (по умолчанию: ["hellaswag", "mmlu", "gsm8k"])
+        batch_size (int): Размер батча (по умолчанию: 8)
+        num_samples (int): Количество образцов для измерения скорости (по умолчанию: 10)
+        save_results (bool): Сохранять ли результаты в файл (по умолчанию: True)
+        
+    Returns:
+        dict: Словарь с результатами оценки
+    """
+    evaluator_obj = ModelEvaluator(model=model, tokenizer=tokenizer, model_name=model_name)
+    return evaluator_obj.run_full_evaluation(tasks, batch_size, num_samples, save_results)
+
+"""
+===============================================================================
+                    ПРИМЕР ИСПОЛЬЗОВАНИЯ ИЗ JUPYTER NOTEBOOK
+===============================================================================
+
+ЭТАП 1: ПОДГОТОВКА И ИМПОРТ
+===============================================================================
+
+# 1.1 Настройка путей и импорт библиотек
+import sys
+sys.path.append('./src')  # Добавляем путь к модулю main.py
+
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from main import evaluate_preloaded_model, ModelEvaluator
+
+# 1.2 Загрузка модели и токенизатора
+model_name = "./Текстовые/Qwen3-0.6B"  # Укажите путь к вашей модели
+
+# Токенизатор - преобразует текст в токены для модели
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+# Модель - основная языковая модель
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    torch_dtype="auto",  # Автоматический выбор типа данных (float16/float32)
+    device_map="auto"    # Автоматическое размещение на CPU/GPU
+)
+
+===============================================================================
+ЭТАП 2: ОСНОВНЫЕ СПОСОБЫ ОЦЕНКИ
+===============================================================================
+
+СПОСОБ 1: БЫСТРАЯ ОЦЕНКА (рекомендуется для большинства случаев)
+------------------------------------------------------------------------------
+НАЗНАЧЕНИЕ: Полная оценка модели одной функцией
+ПРЕИМУЩЕСТВА: 
+- Минимум кода
+- Автоматическое выполнение всех этапов
+- Готовые результаты в удобном формате
+
+КОГДА ИСПОЛЬЗОВАТЬ:
+✓ Быстрая оценка модели
+✓ Сравнение нескольких моделей  
+✓ Исследовательские цели
+✓ Когда нужны все метрики сразу
+
+results = evaluate_preloaded_model(
+    model=model,                    # Предзагруженная модель (ОБЯЗАТЕЛЬНО)
+    tokenizer=tokenizer,            # Предзагруженный токенизатор (ОБЯЗАТЕЛЬНО)
+    model_name="Qwen3-0.6B",        # Название для логирования (опционально)
+    tasks=["hellaswag", "gsm8k"],   # Задачи для оценки точности
+    batch_size=4,                   # Размер батча (влияет на память/скорость)
+    num_samples=10,                 # Образцы для измерения скорости генерации
+    save_results=True               # Сохранить результаты в JSON файл
+)
+
+СПОСОБ 2: ДЕТАЛЬНЫЙ КОНТРОЛЬ (для продвинутых пользователей)
+------------------------------------------------------------------------------
+НАЗНАЧЕНИЕ: Поэтапная оценка с полным контролем процесса
+ПРЕИМУЩЕСТВА:
+- Контроль каждого этапа оценки
+- Доступ к промежуточным результатам
+- Гибкая настройка параметров
+
+КОГДА ИСПОЛЬЗОВАТЬ:
+✓ Отладка и анализ производительности
+✓ Выполнение только части оценки
+✓ Интеграция в сложные пайплайны
+✓ Когда нужен детальный контроль
+
+# 2.1 Создание оценщика
+evaluator = ModelEvaluator(
+    model=model,                    # Предзагруженная модель
+    tokenizer=tokenizer,            # Предзагруженный токенизатор
+    model_name="Qwen3-0.6B"         # Название для логирования
+)
+
+# 2.2 Этап A: Измерение скорости генерации
+# НАЗНАЧЕНИЕ: Определяет токенов/сек
+# ПОЛЕЗНО: Сравнение производительности, оптимизация
+speed_metrics = evaluator.measure_generation_speed(num_samples=5)
+
+# 2.3 Этап B: Полная оценка с настройками
+# НАЗНАЧЕНИЕ: Все этапы оценки с контролем параметров
+full_results = evaluator.run_full_evaluation(
+    tasks=["hellaswag"],            # Задачи для оценки
+    batch_size=2,                   # Размер батча
+    num_samples=5,                  # Образцы для скорости
+    save_results=False              # Не сохранять в файл
+)
+
+===============================================================================
+ЭТАП 3: АНАЛИЗ РЕЗУЛЬТАТОВ
+===============================================================================
+
+# 3.1 Основные метрики производительности
+print(f"Скорость генерации: {results['generation_speed']:.2f} токенов/сек")
+print(f"Время оценки: {results['evaluation_time']:.2f} секунд")
+
+# 3.2 Анализ системных ресурсов
+system_metrics = results['system_metrics']
+print(f"Использование RAM: {system_metrics['final']['memory']['used_gb']:.1f} GB")
+print(f"Использование GPU: {system_metrics['final']['gpu']['memory_used_gb']:.1f} GB")
+
+# 3.3 Анализ точности по задачам
+if results['lm_eval_results'] and 'results' in results['lm_eval_results']:
+    for task, metrics in results['lm_eval_results']['results'].items():
+        if 'acc,none' in metrics:
+            print(f"Точность {task}: {metrics['acc,none']:.4f}")
+
+===============================================================================
+ЭТАП 4: СПЕЦИАЛЬНЫЕ СЦЕНАРИИ
+===============================================================================
+
+СЦЕНАРИЙ 1: ТОЛЬКО ИЗМЕРЕНИЕ СКОРОСТИ
+------------------------------------------------------------------------------
+НАЗНАЧЕНИЕ: Быстрая оценка производительности без тестов точности
+КОГДА ИСПОЛЬЗОВАТЬ:
+✓ Быстрое сравнение скорости моделей
+✓ Когда точность уже известна
+✓ Оптимизация производительности
+✓ Ограниченные вычислительные ресурсы
+
+performance_results = evaluate_preloaded_model(
+    model=model,
+    tokenizer=tokenizer,
+    tasks=[],                       # Пустой список = пропустить LM Evaluation
+    num_samples=20,                 # Больше образцов для точности
+    save_results=False              # Не сохранять результаты
+)
+
+СЦЕНАРИЙ 2: ТОЛЬКО ОЦЕНКА ТОЧНОСТИ
+------------------------------------------------------------------------------
+НАЗНАЧЕНИЕ: Фокус на качестве модели без измерения производительности
+КОГДА ИСПОЛЬЗОВАТЬ:
+✓ Когда производительность не важна
+✓ Финальная оценка качества
+✓ Ограниченное время
+
+accuracy_results = evaluator.run_full_evaluation(
+    tasks=["hellaswag", "mmlu", "gsm8k"],  # Все важные задачи
+    batch_size=8,                          # Оптимальный батч
+    num_samples=0,                         # Пропустить измерение скорости
+    save_results=True
+)
+
+СЦЕНАРИЙ 3: СРАВНЕНИЕ НЕСКОЛЬКИХ МОДЕЛЕЙ
+------------------------------------------------------------------------------
+НАЗНАЧЕНИЕ: Систематическое сравнение производительности и качества
+КОГДА ИСПОЛЬЗОВАТЬ:
+✓ Выбор лучшей модели для задачи
+✓ Исследование влияния размера модели
+✓ Документирование экспериментов
+
+def compare_models(model_configs):
+    \"\"\"
+    Сравнение нескольких моделей
+    
+    Args:
+        model_configs: Список конфигураций моделей
+        [{'name': 'model1', 'path': './path1', 'tasks': ['hellaswag']}, ...]
+    
+    Returns:
+        dict: Результаты сравнения по моделям
+    \"\"\"
+    results = {}
+    
+    for config in model_configs:
+        print(f"Оценка модели: {config['name']}")
+        
+        # Загрузка модели
+        tokenizer = AutoTokenizer.from_pretrained(config['path'])
+        model = AutoModelForCausalLM.from_pretrained(
+            config['path'], torch_dtype="auto", device_map="auto"
+        )
+        
+        # Оценка
+        model_results = evaluate_preloaded_model(
+            model=model,
+            tokenizer=tokenizer,
+            model_name=config['name'],
+            tasks=config.get('tasks', ['hellaswag']),
+            batch_size=config.get('batch_size', 4),
+            num_samples=config.get('num_samples', 10),
+            save_results=True
+        )
+        
+        results[config['name']] = model_results
+        
+        # Очистка памяти
+        del model, tokenizer
+        torch.cuda.empty_cache()
+    
+    return results
+
+# ПРИМЕР ИСПОЛЬЗОВАНИЯ СРАВНЕНИЯ:
+# model_configs = [
+#     {'name': 'Qwen3-0.6B', 'path': './Текстовые/Qwen3-0.6B', 'tasks': ['hellaswag']},
+#     {'name': 'Qwen3-1.5B', 'path': './Текстовые/Qwen3-1.5B', 'tasks': ['hellaswag']}
+# ]
+# comparison_results = compare_models(model_configs)
+
+===============================================================================
+СПРАВОЧНИК ПАРАМЕТРОВ
+===============================================================================
+
+tasks (список задач):
+- "hellaswag"     - здравый смысл и логика
+- "mmlu"          - многозадачное понимание языка  
+- "gsm8k"         - математические задачи
+- "arc_easy"      - рассуждения (легкий уровень)
+- "arc_challenge" - рассуждения (сложный уровень)
+- "truthfulqa"    - правдивость ответов
+- "winogrande"    - разрешение местоимений
+- "piqa"          - физический здравый смысл
+
+batch_size (размер батча):
+- 1-2: Экономия памяти, медленная работа
+- 4-8: Оптимальный баланс (рекомендуется)
+- 16+: Быстрая работа, много памяти
+
+num_samples (образцы для скорости):
+- 5-10: Быстрая оценка
+- 20-50: Точная оценка
+- 100+: Очень точная оценка
+
+save_results (сохранение):
+- True: Сохранить в JSON файл с временной меткой
+- False: Только в памяти
+"""
