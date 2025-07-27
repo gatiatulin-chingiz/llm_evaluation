@@ -781,6 +781,7 @@ class ModelEvaluator:
         - Временные метрики
         - Системные ресурсы
         - Производительность
+        - Детальная статистика по промптам
         
         Args:
             summary (dict): Словарь с базовыми результатами оценки
@@ -816,6 +817,25 @@ class ModelEvaluator:
         print(f"\nПРОИЗВОДИТЕЛЬНОСТЬ:")
         print(f"  Скорость генерации: {summary['generation_speed']:.2f} токенов/сек")
         print(f"  Обработано токенов: {summary['total_tokens_generated']}")
+        
+        # Детальная статистика по промптам
+        detailed_stats = summary.get('generation_speed_detailed', {}).get('detailed_stats', [])
+        if detailed_stats:
+            print(f"\nДЕТАЛЬНАЯ СТАТИСТИКА ПО ПРОМПТАМ:")
+            
+            # Вычисляем среднее время ответа
+            response_times = [stat['generation_time'] for stat in detailed_stats]
+            avg_response_time = sum(response_times) / len(response_times) if response_times else 0
+            
+            print(f"  Среднее время ответа: {avg_response_time:.2f} сек")
+            print(f"  Время ответа по промптам:")
+            
+            for stat in detailed_stats:
+                prompt_num = stat['prompt_number']
+                gen_time = stat['generation_time']
+                tokens = stat['generated_tokens']
+                speed = stat['tokens_per_second']
+                print(f"    Промпт {prompt_num}: {gen_time:.2f} сек ({tokens} токенов, {speed:.1f} токенов/сек)")
         
         if summary['results_file']:
             print(f"\nРезультаты сохранены в: {summary['results_file']}")
