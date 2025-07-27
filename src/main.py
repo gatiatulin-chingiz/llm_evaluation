@@ -235,7 +235,7 @@ class ModelEvaluator:
             json.dump(output_data, f, indent=2, ensure_ascii=False)
         
         self.logger.info(f"Результаты сохранены в {filename}")
-                return filename
+        return filename
 
     def save_basic_results(self, basic_metrics, filename=None):
         """Сохранение базовых результатов в JSON"""
