@@ -266,6 +266,7 @@ class ModelEvaluator:
         - Время генерации для каждого промпта
         - Количество сгенерированных токенов
         - Скорость генерации (токенов/сек)
+        - Сохраняет промпты и ответы модели
         
         Args:
             num_samples (int): Количество тестовых промптов для измерения скорости.
@@ -277,30 +278,32 @@ class ModelEvaluator:
                 - total_tokens (int): Общее количество сгенерированных токенов
                 - total_time (float): Общее время генерации в секундах
                 - detailed_stats (list): Детальная статистика по каждому промпту
+                - prompts_and_responses (list): Промпты и ответы модели
         """
         self.logger.info("Замер скорости генерации...")
         self.log_system_resources("(перед генерацией)")
         
-        # Набор тестовых промптов для измерения скорости
-        # Разнообразные темы для более реалистичного тестирования
+        # Набор тестовых промптов для измерения скорости (математика и страхование)
         test_prompts = [
-            "Объясни, как работает искусственный интеллект.",
-            "Расскажи о важности образования в современном мире.",
-            "Опиши процесс фотосинтеза.",
-            "Какие преимущества даёт изучение иностранных языков?",
-            "Объясни концепцию машинного обучения простыми словами.",
-            "Опиши, что такое квантовая физика.",
-            "Расскажи о влиянии технологий на общество.",
-            "Объясни, как работает блокчейн.",
-            "Опиши процесс эволюции видов.",
-            "Расскажи о важности экологии."
-        ] * (num_samples // 10 + 1)  # Повторяем промпты, если нужно больше образцов
+            "Опиши подробно, что такое градиентный спуск и как он работает.",
+            "Игральную кость с 6 гранями бросают дважды. Найдите вероятность того, что оба раза выпало число, большее 3.",
+            "Какие полисы в страховании можно считать убыточными?",
+            "Объясни принцип работы франшизы в автостраховании и её влияние на стоимость полиса.",
+            "Что такое математическое ожидание и как его вычислить?"
+        ]
+        
+        # Повторяем промпты, если нужно больше образцов
+        if num_samples > len(test_prompts):
+            repeats = (num_samples // len(test_prompts)) + 1
+            test_prompts = test_prompts * repeats
         
         test_prompts = test_prompts[:num_samples]  # Обрезаем до нужного количества
         
         total_tokens = 0      # Общее количество сгенерированных токенов
         total_time = 0        # Общее время генерации
         generation_stats = [] # Детальная статистика по каждому промпту
+        speeds = []           # Список скоростей для расчета среднего
+        prompts_and_responses = []  # Промпты и ответы модели
         
         for i, prompt in enumerate(test_prompts):
             # Логируем ресурсы каждые 5 итераций для мониторинга
@@ -324,12 +327,25 @@ class ModelEvaluator:
             
             gen_time = time.time() - start_time
             
+            # Декодируем ответ модели
+            model_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
             # Подсчет сгенерированных токенов (исключаем входные токены)
             new_tokens = outputs.shape[1] - inputs.shape[1]
             tokens_per_sec = new_tokens / gen_time
             
             total_tokens += new_tokens
             total_time += gen_time
+            speeds.append(tokens_per_sec)  # Добавляем скорость в список для среднего
+            
+            # Сохраняем промпт и ответ модели
+            prompts_and_responses.append({
+                "prompt_number": i+1,
+                "prompt": prompt,
+                "response": model_response,
+                "prompt_tokens": inputs.shape[1],
+                "response_tokens": new_tokens
+            })
             
             # Сохраняем детальную статистику для каждого промпта
             stat = {
@@ -343,15 +359,18 @@ class ModelEvaluator:
             
             self.logger.info(f"Промпт {i+1}: {new_tokens} токенов за {gen_time:.2f}с = {tokens_per_sec:.2f} токенов/сек")
         
-        avg_tokens_per_sec = total_tokens / total_time
-        self.logger.info(f"Средняя скорость: {avg_tokens_per_sec:.2f} токенов/сек")
+        # Рассчитываем среднюю скорость как среднее арифметическое всех измерений
+        avg_tokens_per_sec = sum(speeds) / len(speeds) if speeds else 0
+        self.logger.info(f"Средняя скорость (среднее): {avg_tokens_per_sec:.2f} токенов/сек")
         self.log_system_resources("(после генерации)")
         
         return {
-            "average_tokens_per_second": avg_tokens_per_sec,  # Средняя скорость генерации
+            "average_tokens_per_second": avg_tokens_per_sec,  # Средняя скорость генерации (среднее)
             "total_tokens": total_tokens,                     # Общее количество токенов
             "total_time": total_time,                         # Общее время генерации
-            "detailed_stats": generation_stats                # Детальная статистика по промптам
+            "detailed_stats": generation_stats,               # Детальная статистика по промптам
+            "speed_measurements": speeds,                     # Все измерения скорости для анализа
+            "prompts_and_responses": prompts_and_responses    # Промпты и ответы модели
         }
     
     def save_results(self, results, eval_time, speed_metrics, system_metrics, filename=None):
@@ -384,7 +403,16 @@ class ModelEvaluator:
                 "cpu_percent": 45.2,
                 "gpu_vram_used_gb": 4.2,
                 "gpu_vram_total_gb": 8.0
-            }
+            },
+            "prompts_and_responses": [
+                {
+                    "prompt_number": 1,
+                    "prompt": "Реши уравнение: 2x + 5 = 13. Покажи пошаговое решение.",
+                    "response": "Давайте решим это уравнение пошагово...",
+                    "prompt_tokens": 15,
+                    "response_tokens": 45
+                }
+            ]
         }
         
         Args:
@@ -448,7 +476,8 @@ class ModelEvaluator:
                 "total_generation_time_seconds": round(speed_metrics['total_time'], 2)
             },
             "accuracy_results": accuracy_results,
-            "system_summary": system_summary
+            "system_summary": system_summary,
+            "prompts_and_responses": speed_metrics.get('prompts_and_responses', [])
         }
         
         # Сохранение в JSON файл с отступами для читаемости
@@ -483,7 +512,16 @@ class ModelEvaluator:
                 "cpu_percent": 45.2,
                 "gpu_vram_used_gb": 4.2,
                 "gpu_vram_total_gb": 8.0
-            }
+            },
+            "prompts_and_responses": [
+                {
+                    "prompt_number": 1,
+                    "prompt": "Реши уравнение: 2x + 5 = 13. Покажи пошаговое решение.",
+                    "response": "Давайте решим это уравнение пошагово...",
+                    "prompt_tokens": 15,
+                    "response_tokens": 45
+                }
+            ]
         }
         
         Args:
@@ -528,7 +566,8 @@ class ModelEvaluator:
                 "total_tokens_generated": basic_metrics['total_tokens_generated'],
                 "total_generation_time_seconds": round(basic_metrics['generation_time'], 2)
             },
-            "system_summary": system_summary
+            "system_summary": system_summary,
+            "prompts_and_responses": basic_metrics.get('generation_speed_detailed', {}).get('prompts_and_responses', [])
         }
         
         # Сохранение в JSON файл с отступами для читаемости
