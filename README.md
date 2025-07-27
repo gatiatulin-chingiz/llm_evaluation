@@ -24,30 +24,32 @@ pip install transformers torch lm-eval psutil GPUtil
 #### Простой способ:
 
 ```python
+# Добавляем путь к модулю в системный путь Python
 import sys
 sys.path.append('./src')
 
+# Импортируем необходимые компоненты
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from main import evaluate_preloaded_model
 
-# Загрузка модели
-model_name = "./Текстовые/Qwen3-0.6B"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+# Загрузка модели и токенизатора
+model_name = "./Текстовые/Qwen3-0.6B"  # Путь к вашей модели
+tokenizer = AutoTokenizer.from_pretrained(model_name)  # Токенизатор для преобразования текста в токены
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    torch_dtype="auto",
-    device_map="auto"
+    torch_dtype="auto",  # Автоматический выбор типа данных (float16/float32)
+    device_map="auto"    # Автоматическое размещение на CPU/GPU
 )
 
-# Оценка модели
+# Оценка модели с подробными комментариями к каждому параметру
 results = evaluate_preloaded_model(
-    model=model,
-    tokenizer=tokenizer,
-    model_name="Qwen3-0.6B",  # Опционально, для логирования
-    tasks=["hellaswag", "gsm8k"],
-    batch_size=4,
-    num_samples=10,
-    save_results=True
+    model=model,                    # Предзагруженная модель (ОБЯЗАТЕЛЬНО)
+    tokenizer=tokenizer,            # Предзагруженный токенизатор (ОБЯЗАТЕЛЬНО)
+    model_name="Qwen3-0.6B",        # Название модели для логирования и именования файлов
+    tasks=["hellaswag", "gsm8k"],   # Список задач для оценки точности модели
+    batch_size=4,                   # Размер батча (влияет на скорость и потребление памяти)
+    num_samples=10,                 # Количество образцов для измерения скорости генерации
+    save_results=True               # Сохранять ли результаты в JSON файл
 )
 ```
 
@@ -56,98 +58,219 @@ results = evaluate_preloaded_model(
 ```python
 from main import ModelEvaluator
 
-# Создание оценщика
+# Создание оценщика с детальным контролем
 evaluator = ModelEvaluator(
-    model=model, 
-    tokenizer=tokenizer, 
-    model_name="Qwen3-0.6B"
+    model=model,                    # Предзагруженная модель
+    tokenizer=tokenizer,            # Предзагруженный токенизатор
+    model_name="Qwen3-0.6B"         # Название для логирования и идентификации
 )
 
-# Отдельные этапы оценки
-speed_metrics = evaluator.measure_generation_speed(num_samples=10)
+# Отдельный этап: измерение скорости генерации
+speed_metrics = evaluator.measure_generation_speed(
+    num_samples=10                  # Количество тестовых промптов для измерения скорости
+)
 
-# Полная оценка
+# Полная оценка с настраиваемыми параметрами
 full_results = evaluator.run_full_evaluation(
-    tasks=["hellaswag", "mmlu", "gsm8k"],
-    batch_size=8,
-    num_samples=20,
-    save_results=True
+    tasks=["hellaswag", "mmlu", "gsm8k"],  # Список задач для оценки точности
+    batch_size=8,                          # Размер батча для обработки задач
+    num_samples=20,                        # Количество образцов для измерения скорости
+    save_results=True                      # Сохранить результаты в файл
 )
 ```
 
-## Параметры
+## Подробное описание параметров
 
-### evaluate_preloaded_model()
+### evaluate_preloaded_model() - Основная функция оценки
 
-- `model`: Предзагруженная модель (обязательно)
-- `tokenizer`: Предзагруженный токенизатор (обязательно)
-- `model_name` (str, optional): Название модели для логирования и сохранения результатов
-- `tasks` (list): Список задач для оценки (по умолчанию: ["hellaswag", "mmlu", "gsm8k"])
-- `batch_size` (int): Размер батча (по умолчанию: 8)
-- `num_samples` (int): Количество образцов для измерения скорости (по умолчанию: 10)
-- `save_results` (bool): Сохранять ли результаты в файл (по умолчанию: True)
+#### Обязательные параметры:
+- **`model`**: Предзагруженная модель (AutoModelForCausalLM)
+  - Должна быть загружена заранее через `AutoModelForCausalLM.from_pretrained()`
+  - Определяет архитектуру и веса модели для оценки
 
-### ModelEvaluator.run_full_evaluation()
+- **`tokenizer`**: Предзагруженный токенизатор (AutoTokenizer)
+  - Должен быть загружен заранее через `AutoTokenizer.from_pretrained()`
+  - Преобразует текст в токены для модели и обратно
 
-Те же параметры, что и у `evaluate_preloaded_model()`.
+#### Опциональные параметры:
+- **`model_name`** (str, optional): Название модели
+  - Используется для логирования и именования файлов результатов
+  - Если не указано, используется "preloaded_model"
+  - Пример: "Qwen3-0.6B", "LLaMA-7B", "GPT-2"
 
-## Доступные задачи
+- **`tasks`** (list): Список задач для оценки точности
+  - По умолчанию: `["hellaswag", "mmlu", "gsm8k"]`
+  - Доступные задачи: hellaswag, mmlu, gsm8k, arc_easy, arc_challenge, truthfulqa, winogrande, piqa
+  - Пустой список `[]` = пропустить оценку точности, только измерить скорость
 
-- `hellaswag`: HellaSwag
-- `mmlu`: Massive Multitask Language Understanding
-- `gsm8k`: Grade School Math 8K
-- `arc_easy`: AI2 Reasoning Challenge (Easy)
-- `arc_challenge`: AI2 Reasoning Challenge (Challenge)
-- `truthfulqa`: TruthfulQA
-- `winogrande`: Winogrande
-- `piqa`: Physical IQa
+- **`batch_size`** (int): Размер батча для обработки
+  - По умолчанию: 8
+  - Меньшие значения (1-4): экономия памяти, медленная работа
+  - Большие значения (8-16): быстрая работа, больше памяти
+  - Рекомендуется: 4-8 для большинства случаев
 
-## Результаты
+- **`num_samples`** (int): Количество образцов для измерения скорости
+  - По умолчанию: 10
+  - Меньшие значения (5-10): быстрая оценка
+  - Большие значения (20-50): точная оценка
+  - 0 = пропустить измерение скорости
 
-Функции возвращают словарь с результатами:
+- **`save_results`** (bool): Сохранение результатов в файл
+  - По умолчанию: True
+  - True: сохранить в JSON файл с временной меткой
+  - False: только в памяти, не сохранять
+
+### ModelEvaluator.run_full_evaluation() - Расширенная оценка
+
+Использует те же параметры, что и `evaluate_preloaded_model()`, но с дополнительными возможностями:
+- Более детальное логирование
+- Доступ к промежуточным результатам
+- Возможность поэтапного выполнения
+
+## Доступные задачи оценки
+
+### Основные задачи:
+- **`hellaswag`**: HellaSwag - здравый смысл и логика
+- **`mmlu`**: Massive Multitask Language Understanding - многозадачное понимание языка
+- **`gsm8k`**: Grade School Math 8K - математические задачи
+
+### Дополнительные задачи:
+- **`arc_easy`**: AI2 Reasoning Challenge (Easy) - рассуждения, легкий уровень
+- **`arc_challenge`**: AI2 Reasoning Challenge (Challenge) - рассуждения, сложный уровень
+- **`truthfulqa`**: TruthfulQA - правдивость и точность ответов
+- **`winogrande`**: Winogrande - разрешение местоимений и контекста
+- **`piqa`**: Physical IQa - физический здравый смысл
+
+## Структура результатов
+
+Функции возвращают словарь с подробными результатами:
 
 ```python
 {
-    "model_name": "название_модели",
-    "load_time": 0.0,  # Всегда 0, так как модель предзагружена
-    "evaluation_time": 120.5,  # Время оценки
-    "generation_speed": 15.2,  # Скорость генерации (токенов/сек)
-    "total_tokens_generated": 1000,  # Общее количество сгенерированных токенов
-    "system_metrics": {...},  # Системные метрики
-    "results_file": "путь_к_файлу.json",  # Путь к сохраненному файлу
-    "lm_eval_results": {...},  # Результаты LM Evaluation Harness
-    "generation_speed_detailed": {...}  # Детальная статистика генерации
+    # Основная информация о модели
+    "model_name": "Qwen3-0.6B",                    # Название модели
+    
+    # Временные метрики
+    "load_time": 0.0,                              # Время загрузки (всегда 0 для предзагруженных)
+    "evaluation_time": 120.5,                      # Время выполнения оценки (секунды)
+    
+    # Метрики производительности
+    "generation_speed": 15.2,                      # Средняя скорость генерации (токенов/сек)
+    "total_tokens_generated": 1000,                # Общее количество сгенерированных токенов
+    
+    # Системная информация
+    "system_metrics": {
+        "initial": {...},                          # Системные ресурсы в начале
+        "final": {...},                            # Системные ресурсы в конце
+        "model_load_time": 0.0,                    # Время загрузки модели
+        "evaluation_time": 120.5,                  # Время оценки
+        "generation_time": 45.2                    # Время измерения скорости
+    },
+    
+    # Файлы и результаты
+    "results_file": "Qwen3-0.6B_evaluation_20241201_143022.json",  # Путь к сохраненному файлу
+    "lm_eval_results": {...},                      # Детальные результаты LM Evaluation Harness
+    "generation_speed_detailed": {                 # Детальная статистика генерации
+        "average_tokens_per_second": 15.2,
+        "total_tokens": 1000,
+        "total_time": 45.2,
+        "detailed_stats": [...]                    # Статистика по каждому образцу
+    }
+}
+```
+
+### Детализация system_metrics:
+```python
+"system_metrics": {
+    "initial": {
+        "cpu": {"cpu_avg_percent": 25.5, "cpu_count_logical": 16},
+        "memory": {"used_gb": 8.2, "total_gb": 32.0, "percent": 25.6},
+        "gpu": {"memory_used_gb": 2.1, "memory_total_gb": 24.0, "utilization_percent": 15.2}
+    },
+    "final": {
+        "cpu": {"cpu_avg_percent": 45.2, "cpu_count_logical": 16},
+        "memory": {"used_gb": 12.8, "total_gb": 32.0, "percent": 40.0},
+        "gpu": {"memory_used_gb": 18.5, "memory_total_gb": 24.0, "utilization_percent": 85.3}
+    }
+}
+```
+
+### Детализация lm_eval_results:
+```python
+"lm_eval_results": {
+    "results": {
+        "hellaswag": {
+            "acc,none": 0.7523,                    # Точность на задаче
+            "acc_stderr,none": 0.0041              # Стандартная ошибка
+        },
+        "gsm8k": {
+            "exact_match,none": 0.2341,            # Точное совпадение
+            "exact_match_stderr,none": 0.0089      # Стандартная ошибка
+        }
+    }
 }
 ```
 
 ## Системные требования
 
-- Python 3.7+
-- CUDA-совместимая GPU (рекомендуется)
-- Минимум 8GB RAM
-- Для больших моделей рекомендуется 16GB+ RAM
+### Минимальные требования:
+- **Python**: 3.7+
+- **RAM**: 8GB (минимум)
+- **GPU**: CUDA-совместимая (рекомендуется)
 
-## Примеры использования
+### Рекомендуемые требования:
+- **RAM**: 16GB+ (для больших моделей)
+- **GPU**: NVIDIA с 8GB+ VRAM
+- **CPU**: 8+ ядер
 
-Смотрите файл `example_usage.ipynb` для подробных примеров использования.
+### Зависимости:
+- `transformers`: для работы с моделями
+- `torch`: для вычислений
+- `lm-eval`: для оценки точности
+- `psutil`: для мониторинга системных ресурсов
+- `GPUtil`: для мониторинга GPU
 
 ## Логирование
 
-Все операции логируются в файл `model_evaluation.log` и выводятся в консоль.
+### Файлы логов:
+- **`model_evaluation.log`**: Основной файл логов
+- **`{model_name}_evaluation_results_{timestamp}.json`**: Результаты оценки
+
+### Уровни логирования:
+- **INFO**: Основная информация о процессе
+- **WARNING**: Предупреждения о ресурсах
+- **ERROR**: Ошибки выполнения
 
 ## Поддерживаемые модели
 
 Фреймворк поддерживает все модели, совместимые с Hugging Face Transformers:
-- Qwen
-- LLaMA
-- GPT-2/3/4
-- BLOOM
-- T5
-- И другие
+
+### Популярные семейства:
+- **Qwen**: Qwen1.5, Qwen2, Qwen3
+- **LLaMA**: LLaMA-2, LLaMA-3, Code Llama
+- **GPT**: GPT-2, GPT-3, GPT-4
+- **BLOOM**: BLOOM, BLOOMZ
+- **T5**: T5, Flan-T5, mT5
+
+### Требования к моделям:
+- Должны быть в формате Hugging Face
+- Поддерживать генерацию текста
+- Иметь соответствующий токенизатор
 
 ## Важные замечания
 
+### Обязательные требования:
 - **Модель и токенизатор должны быть загружены заранее** - модуль не поддерживает загрузку моделей по имени
 - **Обязательные параметры**: `model` и `tokenizer` должны быть переданы при инициализации
+
+### Рекомендации по использованию:
 - **Эффективность**: Модуль оптимизирован для работы с уже загруженными моделями
-- **Гибкость**: Можно выполнять как полную оценку, так и отдельные этапы (только скорость генерации)
+- **Гибкость**: Можно выполнять как полную оценку, так и отдельные этапы
+- **Память**: Следите за использованием GPU памяти при больших моделях
+- **Время**: Полная оценка может занять от нескольких минут до часов
+
+### Типичные сценарии использования:
+- **Быстрая оценка**: `tasks=["hellaswag"], num_samples=10`
+- **Точная оценка**: `tasks=["hellaswag", "mmlu", "gsm8k"], num_samples=50`
+- **Только производительность**: `tasks=[], num_samples=100`
+- **Экономия памяти**: `batch_size=2, num_samples=5`
