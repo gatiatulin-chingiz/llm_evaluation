@@ -478,32 +478,7 @@ class ModelEvaluator:
         """Вывод сводки результатов (устаревший метод, используйте _print_basic_summary или _print_full_summary)"""
         self._print_full_summary(summary)
 
-# Функция для удобного использования из Jupyter Notebook
-def evaluate_preloaded_model(model, tokenizer, model_name=None, tasks=["hellaswag", "mmlu", "gsm8k"], 
-                           batch_size=8, num_samples=10, save_results=True, evaluation_type="full"):
-    """
-    Удобная функция для оценки предзагруженной модели из Jupyter Notebook
-    
-    Args:
-        model: Предзагруженная модель (обязательно)
-        tokenizer: Предзагруженный токенизатор (обязательно)
-        model_name (str, optional): Название модели для логирования и сохранения результатов
-        tasks (list): Список задач для оценки (по умолчанию: ["hellaswag", "mmlu", "gsm8k"])
-        batch_size (int): Размер батча (по умолчанию: 8)
-        num_samples (int): Количество образцов для измерения скорости (по умолчанию: 10)
-        save_results (bool): Сохранять ли результаты в файл (по умолчанию: True)
-        evaluation_type (str): Тип оценки - "basic" или "full" (по умолчанию: "full")
-        
-    Returns:
-        dict: Словарь с результатами оценки
-    """
-    evaluator_obj = ModelEvaluator(model=model, tokenizer=tokenizer, model_name=model_name)
-    
-    if evaluation_type == "basic":
-        return evaluator_obj.run_basic_evaluation(num_samples, save_results)
-    else:
-        return evaluator_obj.run_full_evaluation(tasks, batch_size, num_samples, save_results)
-
+# Функция для базовой оценки модели
 def evaluate_basic_model(model, tokenizer, model_name=None, num_samples=10, save_results=True):
     """
     Базовая оценка модели - только системные и производительные метрики
@@ -520,6 +495,27 @@ def evaluate_basic_model(model, tokenizer, model_name=None, num_samples=10, save
     """
     evaluator_obj = ModelEvaluator(model=model, tokenizer=tokenizer, model_name=model_name)
     return evaluator_obj.run_basic_evaluation(num_samples, save_results)
+
+# Функция для расширенной оценки модели
+def evaluate_full_model(model, tokenizer, model_name=None, tasks=["hellaswag", "mmlu", "gsm8k"], 
+                       batch_size=8, num_samples=10, save_results=True):
+    """
+    Расширенная оценка модели - включает тесты точности
+    
+    Args:
+        model: Предзагруженная модель (обязательно)
+        tokenizer: Предзагруженный токенизатор (обязательно)
+        model_name (str, optional): Название модели для логирования
+        tasks (list): Список задач для оценки точности (по умолчанию: ["hellaswag", "mmlu", "gsm8k"])
+        batch_size (int): Размер батча (по умолчанию: 8)
+        num_samples (int): Количество образцов для измерения скорости (по умолчанию: 10)
+        save_results (bool): Сохранять ли результаты в файл (по умолчанию: True)
+        
+    Returns:
+        dict: Словарь с полными результатами оценки
+    """
+    evaluator_obj = ModelEvaluator(model=model, tokenizer=tokenizer, model_name=model_name)
+    return evaluator_obj.run_full_evaluation(tasks, batch_size, num_samples, save_results)
 
 """
 ===============================================================================
@@ -568,17 +564,6 @@ model = AutoModelForCausalLM.from_pretrained(
 ✓ Отладка и тестирование
 ✓ Когда точность не важна
 
-# Вариант 1A: Базовая оценка через основную функцию
-results = evaluate_preloaded_model(
-    model=model,                    # Предзагруженная модель (ОБЯЗАТЕЛЬНО)
-    tokenizer=tokenizer,            # Предзагруженный токенизатор (ОБЯЗАТЕЛЬНО)
-    model_name="Qwen3-0.6B",        # Название для логирования (опционально)
-    evaluation_type="basic",        # БАЗОВАЯ ОЦЕНКА (без тестов точности)
-    num_samples=10,                 # Образцы для измерения скорости генерации
-    save_results=True               # Сохранить результаты в JSON файл
-)
-
-# Вариант 1B: Базовая оценка через специализированную функцию
 results = evaluate_basic_model(
     model=model,                    # Предзагруженная модель (ОБЯЗАТЕЛЬНО)
     tokenizer=tokenizer,            # Предзагруженный токенизатор (ОБЯЗАТЕЛЬНО)
@@ -601,11 +586,10 @@ results = evaluate_basic_model(
 ✓ Сравнение качества моделей
 ✓ Когда важна точность
 
-results = evaluate_preloaded_model(
+results = evaluate_full_model(
     model=model,                    # Предзагруженная модель (ОБЯЗАТЕЛЬНО)
     tokenizer=tokenizer,            # Предзагруженный токенизатор (ОБЯЗАТЕЛЬНО)
     model_name="Qwen3-0.6B",        # Название для логирования (опционально)
-    evaluation_type="full",         # РАСШИРЕННАЯ ОЦЕНКА (с тестами точности)
     tasks=["hellaswag", "gsm8k"],   # Задачи для оценки точности
     batch_size=4,                   # Размер батча (влияет на память/скорость)
     num_samples=10,                 # Образцы для измерения скорости генерации
@@ -686,35 +670,30 @@ if results['lm_eval_results'] and 'results' in results['lm_eval_results']:
 ✓ Отладка и тестирование
 ✓ Когда точность не критична
 
-# Вариант 1A: Через основную функцию
-basic_results = evaluate_preloaded_model(
-    model=model,
-    tokenizer=tokenizer,
-    evaluation_type="basic",        # Базовая оценка
-    num_samples=20,                 # Образцы для точного измерения
-    save_results=True               # Сохранить результаты
-)
-
-# Вариант 1B: Через специализированную функцию
 basic_results = evaluate_basic_model(
     model=model,
     tokenizer=tokenizer,
+    model_name="Qwen3-0.6B",        # Название модели
     num_samples=20,                 # Образцы для точного измерения
     save_results=True               # Сохранить результаты
 )
 
-СЦЕНАРИЙ 2: ТОЛЬКО ОЦЕНКА ТОЧНОСТИ
+СЦЕНАРИЙ 2: РАСШИРЕННАЯ ОЦЕНКА (включает тесты точности)
 ------------------------------------------------------------------------------
-НАЗНАЧЕНИЕ: Фокус на качестве модели без измерения производительности
+НАЗНАЧЕНИЕ: Полная оценка модели с тестами точности
 КОГДА ИСПОЛЬЗОВАТЬ:
-✓ Когда производительность не важна
-✓ Финальная оценка качества
-✓ Ограниченное время
+✓ Финальная оценка модели
+✓ Исследовательские цели
+✓ Сравнение качества моделей
+✓ Когда важна точность
 
-accuracy_results = evaluator.run_full_evaluation(
+full_results = evaluate_full_model(
+    model=model,
+    tokenizer=tokenizer,
+    model_name="Qwen3-0.6B",        # Название модели
     tasks=["hellaswag", "mmlu", "gsm8k"],  # Все важные задачи
     batch_size=8,                          # Оптимальный батч
-    num_samples=0,                         # Пропустить измерение скорости
+    num_samples=20,                        # Образцы для измерения скорости
     save_results=True
 )
 
@@ -726,9 +705,48 @@ accuracy_results = evaluator.run_full_evaluation(
 ✓ Исследование влияния размера модели
 ✓ Документирование экспериментов
 
-def compare_models(model_configs):
+def compare_models_basic(model_configs):
     \"\"\"
-    Сравнение нескольких моделей
+    Базовое сравнение нескольких моделей (только производительность)
+    
+    Args:
+        model_configs: Список конфигураций моделей
+        [{'name': 'model1', 'path': './path1'}, ...]
+    
+    Returns:
+        dict: Результаты сравнения по моделям
+    \"\"\"
+    results = {}
+    
+    for config in model_configs:
+        print(f"Базовая оценка модели: {config['name']}")
+        
+        # Загрузка модели
+        tokenizer = AutoTokenizer.from_pretrained(config['path'])
+        model = AutoModelForCausalLM.from_pretrained(
+            config['path'], torch_dtype="auto", device_map="auto"
+        )
+        
+        # Базовая оценка
+        model_results = evaluate_basic_model(
+            model=model,
+            tokenizer=tokenizer,
+            model_name=config['name'],
+            num_samples=config.get('num_samples', 20),
+            save_results=True
+        )
+        
+        results[config['name']] = model_results
+        
+        # Очистка памяти
+        del model, tokenizer
+        torch.cuda.empty_cache()
+    
+    return results
+
+def compare_models_full(model_configs):
+    \"\"\"
+    Полное сравнение нескольких моделей (включая точность)
     
     Args:
         model_configs: Список конфигураций моделей
@@ -740,7 +758,7 @@ def compare_models(model_configs):
     results = {}
     
     for config in model_configs:
-        print(f"Оценка модели: {config['name']}")
+        print(f"Полная оценка модели: {config['name']}")
         
         # Загрузка модели
         tokenizer = AutoTokenizer.from_pretrained(config['path'])
@@ -748,8 +766,8 @@ def compare_models(model_configs):
             config['path'], torch_dtype="auto", device_map="auto"
         )
         
-        # Оценка
-        model_results = evaluate_preloaded_model(
+        # Полная оценка
+        model_results = evaluate_full_model(
             model=model,
             tokenizer=tokenizer,
             model_name=config['name'],
@@ -769,16 +787,40 @@ def compare_models(model_configs):
 
 # ПРИМЕР ИСПОЛЬЗОВАНИЯ СРАВНЕНИЯ:
 # model_configs = [
+#     {'name': 'Qwen3-0.6B', 'path': './Текстовые/Qwen3-0.6B'},
+#     {'name': 'Qwen3-1.5B', 'path': './Текстовые/Qwen3-1.5B'}
+# ]
+# 
+# # Базовое сравнение (быстрое)
+# basic_comparison = compare_models_basic(model_configs)
+# 
+# # Полное сравнение (медленное, но точное)
+# full_comparison = compare_models_full([
 #     {'name': 'Qwen3-0.6B', 'path': './Текстовые/Qwen3-0.6B', 'tasks': ['hellaswag']},
 #     {'name': 'Qwen3-1.5B', 'path': './Текстовые/Qwen3-1.5B', 'tasks': ['hellaswag']}
-# ]
-# comparison_results = compare_models(model_configs)
+# ])
 
 ===============================================================================
 СПРАВОЧНИК ПАРАМЕТРОВ
 ===============================================================================
 
-tasks (список задач):
+evaluate_basic_model() - Базовая оценка:
+- model: Предзагруженная модель (ОБЯЗАТЕЛЬНО)
+- tokenizer: Предзагруженный токенизатор (ОБЯЗАТЕЛЬНО)
+- model_name: Название модели (опционально)
+- num_samples: Образцы для измерения скорости (по умолчанию: 10)
+- save_results: Сохранять результаты (по умолчанию: True)
+
+evaluate_full_model() - Расширенная оценка:
+- model: Предзагруженная модель (ОБЯЗАТЕЛЬНО)
+- tokenizer: Предзагруженный токенизатор (ОБЯЗАТЕЛЬНО)
+- model_name: Название модели (опционально)
+- tasks: Список задач для оценки точности (по умолчанию: ["hellaswag", "mmlu", "gsm8k"])
+- batch_size: Размер батча (по умолчанию: 8)
+- num_samples: Образцы для измерения скорости (по умолчанию: 10)
+- save_results: Сохранять результаты (по умолчанию: True)
+
+Доступные задачи (только для расширенной оценки):
 - "hellaswag"     - здравый смысл и логика
 - "mmlu"          - многозадачное понимание языка  
 - "gsm8k"         - математические задачи
@@ -788,17 +830,22 @@ tasks (список задач):
 - "winogrande"    - разрешение местоимений
 - "piqa"          - физический здравый смысл
 
-batch_size (размер батча):
-- 1-2: Экономия памяти, медленная работа
-- 4-8: Оптимальный баланс (рекомендуется)
-- 16+: Быстрая работа, много памяти
+Рекомендации по параметрам:
+- batch_size: 1-2 (экономия памяти), 4-8 (оптимально), 16+ (быстро)
+- num_samples: 5-10 (быстро), 20-50 (точно), 100+ (очень точно)
 
-num_samples (образцы для скорости):
-- 5-10: Быстрая оценка
-- 20-50: Точная оценка
-- 100+: Очень точная оценка
+===============================================================================
+БАЗОВЫЕ МЕТРИКИ (всегда измеряются)
+===============================================================================
 
-save_results (сохранение):
-- True: Сохранить в JSON файл с временной меткой
-- False: Только в памяти
+1. Время загрузки: 0.0 сек (модель предзагружена)
+2. Время оценки: 0.0 сек (базовая оценка) / N сек (расширенная оценка)
+3. Использование RAM: текущее/общее GB (процент)
+4. Использование CPU: средний процент (количество ядер)
+5. Использование GPU VRAM: текущее/общее GB
+6. Загрузка GPU: процент использования
+7. Скорость генерации: токенов/сек
+8. Обработано токенов: общее количество
+9. Время генерации: секунды
+10. Общее время: сумма всех времен
 """
