@@ -51,6 +51,39 @@ def setup_logging(model_name=None):
 
 logger = setup_logging()
 
+def force_clear_gpu_memory(model_name=""):
+    """
+    Принудительная очистка GPU памяти.
+    
+    Args:
+        model_name (str): Название модели для логирования
+    """
+    import gc
+    
+    # Удаляем все переменные PyTorch
+    for obj in gc.get_objects():
+        try:
+            if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                del obj
+        except:
+            pass
+    
+    # Принудительная сборка мусора
+    gc.collect()
+    
+    # Очистка кэша CUDA
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        
+        # Выводим информацию о памяти
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        if model_name:
+            print(f"GPU память после {model_name}: {allocated:.2f} GB (выделено) / {reserved:.2f} GB (зарезервировано)")
+        else:
+            print(f"GPU память: {allocated:.2f} GB (выделено) / {reserved:.2f} GB (зарезервировано)")
+
 class SystemMonitor:
     """
     Класс для мониторинга системных ресурсов (CPU, RAM, GPU).
@@ -1099,8 +1132,9 @@ def compare_models_basic(model_configs):
         
         results[config['name']] = model_results
         
+        # Принудительное освобождение памяти
         del model, tokenizer
-        torch.cuda.empty_cache()
+        force_clear_gpu_memory(config['name'])
     
     return results
 
@@ -1164,8 +1198,9 @@ def compare_models_full(model_configs):
         
         results[config['name']] = model_results
         
+        # Принудительное освобождение памяти
         del model, tokenizer
-        torch.cuda.empty_cache()
+        force_clear_gpu_memory(config['name'])
     
     return results
 
@@ -1173,7 +1208,7 @@ def compare_models_full(model_configs):
 """
 # Импорт
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from main import evaluate_basic_model, evaluate_full_model
+from main import evaluate_basic_model, evaluate_full_model, force_clear_gpu_memory
 
 # Загрузка модели
 model_name = "./path/to/model"
@@ -1185,4 +1220,7 @@ results = evaluate_basic_model(model, tokenizer, "MyModel")
 
 # Полная оценка (включая точность)
 results = evaluate_full_model(model, tokenizer, "MyModel", tasks=["hellaswag", "gsm8k"])
+
+# Ручная очистка памяти (для Jupyter Notebook)
+force_clear_gpu_memory()
 """
