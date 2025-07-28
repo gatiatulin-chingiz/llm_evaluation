@@ -22,6 +22,7 @@ import GPUtil
 import os
 from datetime import datetime
 import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from lm_eval import evaluator
 from lm_eval.models.huggingface import HFLM
 
