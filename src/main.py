@@ -713,7 +713,7 @@ class ModelEvaluator:
         оценку значительно быстрее полной версии.
         
         Args:
-            save_results (bool, optional): Сохранять ли результаты в JSON файл.
+            save_results (bool, optional): Сохранять ли результаты в txt файл.
                                          По умолчанию True.
         
         Returns:
@@ -926,9 +926,9 @@ class ModelEvaluator:
                 speed = stat['tokens_per_second']
                 print(f"    Промпт {prompt_num}: {gen_time:.2f} сек ({tokens} токенов, {speed:.1f} токенов/сек)")
 
-    if summary.get('results_file'):
-        print(f"\nРезультаты сохранены в: {summary['results_file']}")
-    print("="*60)
+        if summary.get('results_file'):
+            print(f"\nРезультаты сохранены в: {summary.get('results_file')}")
+        print("="*60)
 
     def _print_full_summary(self, summary):
         """
@@ -991,7 +991,7 @@ class ModelEvaluator:
         print(f"  Обработано токенов: {summary['total_tokens_generated']}")
         
         if summary.get('results_file'):
-            print(f"\nРезультаты сохранены в: {summary['results_file']}")
+            print(f"\nРезультаты сохранены в: {summary.get('results_file')}")
         print("="*60)
 
     def _print_summary(self, summary):
