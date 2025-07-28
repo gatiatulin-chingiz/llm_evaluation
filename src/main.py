@@ -685,8 +685,11 @@ class ModelEvaluator:
         output_buffer = io.StringIO()
         sys.stdout = output_buffer
         
+        # Создаем копию метрик без results_file для вывода
+        summary_for_print = basic_metrics.copy()
+        
         # Вызываем метод вывода в консоль
-        self._print_basic_summary(basic_metrics)
+        self._print_basic_summary(summary_for_print)
         
         # Получаем захваченный вывод
         captured_output = output_buffer.getvalue()
@@ -785,7 +788,7 @@ class ModelEvaluator:
                 - "mmlu": Massive Multitask Language Understanding
                 - "gsm8k": Математические задачи
             batch_size (int, optional): Размер батча для оценки точности. По умолчанию 8.
-            save_results (bool, optional): Сохранять ли результаты в JSON файл.
+            save_results (bool, optional): Сохранять ли результаты в txt файл.
                                          По умолчанию True.
         
         Returns:
@@ -922,10 +925,10 @@ class ModelEvaluator:
                 tokens = stat['generated_tokens']
                 speed = stat['tokens_per_second']
                 print(f"    Промпт {prompt_num}: {gen_time:.2f} сек ({tokens} токенов, {speed:.1f} токенов/сек)")
-        
-        if summary['results_file']:
-            print(f"\nРезультаты сохранены в: {summary['results_file']}")
-        print("="*60)
+
+    if summary.get('results_file'):
+        print(f"\nРезультаты сохранены в: {summary['results_file']}")
+    print("="*60)
 
     def _print_full_summary(self, summary):
         """
@@ -987,7 +990,7 @@ class ModelEvaluator:
         print(f"  Скорость генерации: {summary['generation_speed']:.2f} токенов/сек")
         print(f"  Обработано токенов: {summary['total_tokens_generated']}")
         
-        if summary['results_file']:
+        if summary.get('results_file'):
             print(f"\nРезультаты сохранены в: {summary['results_file']}")
         print("="*60)
 
@@ -1016,7 +1019,7 @@ def evaluate_basic_model(model, tokenizer, model_name=None, save_results=True):
         tokenizer: Токенизатор для модели (AutoTokenizer или аналогичный)
         model_name (str, optional): Название модели для идентификации.
                                    Если не указано, используется "preloaded_model"
-        save_results (bool, optional): Сохранять ли результаты в JSON файл.
+        save_results (bool, optional): Сохранять ли результаты в txt файл.
                                       По умолчанию True.
     
     Returns:
@@ -1055,7 +1058,7 @@ def evaluate_full_model(model, tokenizer, model_name=None, tasks=["hellaswag", "
             - "mmlu": Massive Multitask Language Understanding
             - "gsm8k": Математические задачи
         batch_size (int, optional): Размер батча для оценки точности. По умолчанию 8.
-        save_results (bool, optional): Сохранять ли результаты в JSON файл.
+        save_results (bool, optional): Сохранять ли результаты в txt файл.
                                       По умолчанию True.
     
     Returns:
